@@ -26,7 +26,8 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     environment:
       DJANGO_DEBUG: "true"
-      DJANGO_SECRET_KEY: dev-only-insecure-secret-key
+      # Also signs JWTs, so it must be at least 32 characters.
+      DJANGO_SECRET_KEY: dev-only-insecure-secret-key-not-for-production
       DATABASE_URL: postgres://kitchenmind:kitchenmind@db:5432/kitchenmind
       DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
       CORS_ALLOWED_ORIGINS: http://localhost:5173

@@ -12,6 +12,8 @@ from django.db import connection
 from django.test import SimpleTestCase, TestCase
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.settings import api_settings
+from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from .env import env_bool, env_int, env_list, env_str
 
@@ -163,6 +165,28 @@ class SettingsLoadTests(SimpleTestCase):
         self.assertIs(db["CONN_HEALTH_CHECKS"], True)
         self.assertEqual(db["OPTIONS"]["connect_timeout"], 5)
 
+    def test_jwt_defaults_are_short_lived_and_rotating(self):
+        jwt = self.load(VALID_ENV, "SIMPLE_JWT")["SIMPLE_JWT"]
+
+        self.assertEqual(jwt["ACCESS_TOKEN_LIFETIME"], "0:15:00")
+        self.assertEqual(jwt["REFRESH_TOKEN_LIFETIME"], "7 days, 0:00:00")
+        self.assertIs(jwt["ROTATE_REFRESH_TOKENS"], True)
+        self.assertIs(jwt["BLACKLIST_AFTER_ROTATION"], True)
+        self.assertIs(jwt["CHECK_REVOKE_TOKEN"], True)
+        self.assertEqual(jwt["ALGORITHM"], "HS256")
+        self.assertEqual(jwt["SIGNING_KEY"], VALID_ENV["DJANGO_SECRET_KEY"])
+
+    def test_jwt_lifetimes_and_proxy_count_are_configurable(self):
+        values = self.load(
+            {**VALID_ENV, "JWT_ACCESS_TOKEN_MINUTES": "5", "JWT_REFRESH_TOKEN_DAYS": "1",
+             "DRF_NUM_PROXIES": "1"},
+            "SIMPLE_JWT", "REST_FRAMEWORK",
+        )
+
+        self.assertEqual(values["SIMPLE_JWT"]["ACCESS_TOKEN_LIFETIME"], "0:05:00")
+        self.assertEqual(values["SIMPLE_JWT"]["REFRESH_TOKEN_LIFETIME"], "1 day, 0:00:00")
+        self.assertEqual(values["REST_FRAMEWORK"]["NUM_PROXIES"], 1)
+
     def test_database_options_are_configurable(self):
         values = self.load(
             {**VALID_ENV, "DATABASE_CONNECT_TIMEOUT": "2", "DATABASE_SSL_REQUIRE": "true"},
@@ -196,6 +220,13 @@ class DatabaseTests(TestCase):
 class ApiDefaultsTests(SimpleTestCase):
     def test_endpoints_require_authentication_unless_they_opt_out(self):
         self.assertEqual(api_settings.DEFAULT_PERMISSION_CLASSES, [IsAuthenticated])
+
+    def test_authentication_uses_jwt_bearer_tokens_only(self):
+        self.assertEqual(api_settings.DEFAULT_AUTHENTICATION_CLASSES, [JWTAuthentication])
+
+    def test_sign_in_and_registration_are_rate_limited(self):
+        self.assertEqual(api_settings.DEFAULT_THROTTLE_CLASSES, [ScopedRateThrottle])
+        self.assertEqual(api_settings.DEFAULT_THROTTLE_RATES, {"auth": "10/minute"})
 
     def test_list_endpoints_are_paginated(self):
         self.assertEqual(api_settings.PAGE_SIZE, 50)

@@ -1,75 +1,66 @@
-import { useEffect, useState } from 'react'
-import { getHealth } from './api/client.js'
+import { Navigate, Route, Routes, useLocation } from 'react-router'
+import { useAuth } from './auth/useAuth.js'
+import SystemStatus from './components/SystemStatus.jsx'
+import CreateOrganizationPage from './pages/CreateOrganizationPage.jsx'
+import DashboardPage from './pages/DashboardPage.jsx'
+import LoginPage from './pages/LoginPage.jsx'
+import RegisterPage from './pages/RegisterPage.jsx'
 import './App.css'
 
-// Resolves to { health, error } instead of throwing, because a 503 still
-// carries a useful body describing which check failed.
-async function loadHealth() {
-  try {
-    return { health: await getHealth(), error: null }
-  } catch (err) {
-    return { health: err.data ?? null, error: err.message }
+// Pages for signed-in users; everyone else is sent to the sign-in page.
+function RequireAuth({ children }) {
+  const { user } = useAuth()
+  const location = useLocation()
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }
+  return children
 }
 
-function StatusRow({ label, value }) {
-  const ok = value === 'ok'
-  return (
-    <div className="status-row">
-      <span>{label}</span>
-      <span className={`badge ${ok ? 'badge-ok' : 'badge-error'}`}>{value}</span>
-    </div>
-  )
+// Sign-in and registration; signed-in users go back where they were headed.
+function SignedOutOnly({ children }) {
+  const { user } = useAuth()
+  const location = useLocation()
+  if (user) {
+    return <Navigate to={location.state?.from ?? '/'} replace />
+  }
+  return children
 }
 
 function App() {
-  const [result, setResult] = useState({ health: null, error: null })
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    loadHealth().then((next) => {
-      if (!cancelled) {
-        setResult(next)
-        setLoading(false)
-      }
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  async function handleRetry() {
-    setLoading(true)
-    setResult(await loadHealth())
-    setLoading(false)
-  }
-
-  const { health, error } = result
+  const { user, signOut } = useAuth()
 
   return (
     <main className="app">
-      <header>
-        <h1>KitchenMind AI</h1>
-        <p className="tagline">
-          Kitchen operations for independent restaurants, bakeries, and cloud kitchens.
-        </p>
+      <header className="app-header">
+        <div>
+          <h1>KitchenMind AI</h1>
+          <p className="tagline">
+            Kitchen operations for independent restaurants, bakeries, and cloud kitchens.
+          </p>
+        </div>
+        {user && (
+          <div className="account">
+            <span>{user.email}</span>
+            <button type="button" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
+        )}
       </header>
 
-      <section className="card" aria-live="polite">
-        <h2>System status</h2>
-        {loading && <p>Checking API…</p>}
-        {!loading && health && (
-          <>
-            <StatusRow label="API" value={health.status} />
-            <StatusRow label="Database" value={health.database} />
-          </>
-        )}
-        {!loading && error && <p className="error">Could not reach the API: {error}</p>}
-        <button type="button" onClick={handleRetry} disabled={loading}>
-          Check again
-        </button>
-      </section>
+      <Routes>
+        <Route path="/login" element={<SignedOutOnly><LoginPage /></SignedOutOnly>} />
+        <Route path="/register" element={<SignedOutOnly><RegisterPage /></SignedOutOnly>} />
+        <Route
+          path="/organizations/new"
+          element={<RequireAuth><CreateOrganizationPage /></RequireAuth>}
+        />
+        <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+
+      <SystemStatus />
     </main>
   )
 }
