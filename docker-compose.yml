@@ -1,0 +1,57 @@
+# Local development stack. The credentials below are for local use only.
+#
+# BACKEND_PORT (default 8000) sets the host port for the API, e.g.
+#   BACKEND_PORT=8010 docker compose up
+# The frontend's API URL follows it; the frontend origin used for CORS and
+# CSRF (http://localhost:5173) does not change.
+name: kitchenmind
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: kitchenmind
+      POSTGRES_USER: kitchenmind
+      POSTGRES_PASSWORD: kitchenmind
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kitchenmind -d kitchenmind"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    command: python manage.py runserver 0.0.0.0:8000
+    environment:
+      DJANGO_DEBUG: "true"
+      DJANGO_SECRET_KEY: dev-only-insecure-secret-key
+      DATABASE_URL: postgres://kitchenmind:kitchenmind@db:5432/kitchenmind
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CSRF_TRUSTED_ORIGINS: http://localhost:5173
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:${BACKEND_PORT:-8000}
+      VITE_USE_POLLING: "true"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      # Keep the container's node_modules instead of the host's.
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
