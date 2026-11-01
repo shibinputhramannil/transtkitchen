@@ -5,35 +5,23 @@ All environment-specific values come from environment variables; see
 backend/.env.example for the full list.
 """
 
-import os
 from pathlib import Path
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
 
+from .env import env_bool, env_int, env_list, env_str
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-
-def env_bool(name, default=False):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def env_list(name, default=""):
-    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
 
 DEBUG = env_bool("DJANGO_DEBUG")
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")
-if not SECRET_KEY:
-    raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set.")
+SECRET_KEY = env_str("DJANGO_SECRET_KEY", required=True)
 
 ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
 # Render sets this to the service's onrender.com hostname.
-RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+RENDER_EXTERNAL_HOSTNAME = env_str("RENDER_EXTERNAL_HOSTNAME")
 if RENDER_EXTERNAL_HOSTNAME:
     ALLOWED_HOSTS.append(RENDER_EXTERNAL_HOSTNAME)
 
@@ -47,6 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "corsheaders",
     "rest_framework",
+    "apps.accounts",
     "apps.core",
 ]
 
@@ -82,20 +71,26 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    raise ImproperlyConfigured("DATABASE_URL must be set.")
+DATABASE_URL = env_str("DATABASE_URL", required=True)
 
 DATABASES = {
     "default": dj_database_url.parse(
         DATABASE_URL,
-        conn_max_age=int(os.environ.get("DATABASE_CONN_MAX_AGE", "60")),
+        conn_max_age=env_int("DATABASE_CONN_MAX_AGE", 60),
         conn_health_checks=True,
         ssl_require=env_bool("DATABASE_SSL_REQUIRE"),
     )
 }
+if DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
+    raise ImproperlyConfigured("DATABASE_URL must point to a PostgreSQL database.")
+# Fail fast when the database is unreachable instead of waiting for the OS TCP timeout.
+DATABASES["default"].setdefault("OPTIONS", {})["connect_timeout"] = env_int(
+    "DATABASE_CONNECT_TIMEOUT", 5
+)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+AUTH_USER_MODEL = "accounts.User"
 
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -134,6 +129,8 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"]
     + (["rest_framework.renderers.BrowsableAPIRenderer"] if DEBUG else []),
     "UNAUTHENTICATED_USER": None,
+    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "PAGE_SIZE": 50,
 }
 
 
@@ -151,7 +148,7 @@ if not DEBUG:
     SECURE_REDIRECT_EXEMPT = [r"^api/health/$"]
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_SECURE_HSTS_SECONDS", "3600"))
+    SECURE_HSTS_SECONDS = env_int("DJANGO_SECURE_HSTS_SECONDS", 3600)
     SECURE_HSTS_INCLUDE_SUBDOMAINS = False
     SECURE_HSTS_PRELOAD = False
     SECURE_CONTENT_TYPE_NOSNIFF = True
@@ -171,5 +168,5 @@ LOGGING = {
         # django.security.* loggers are unaffected.
         "django.security.DisallowedHost": {"handlers": ["null"], "propagate": False},
     },
-    "root": {"handlers": ["console"], "level": os.environ.get("DJANGO_LOG_LEVEL", "INFO")},
+    "root": {"handlers": ["console"], "level": env_str("DJANGO_LOG_LEVEL", "INFO")},
 }

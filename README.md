@@ -18,7 +18,7 @@ tracking, and waste logging.
 | Hosting  | Render: static site + Docker web service + Postgres |
 
 ```
-backend/    Django project (config/) and apps (apps/core: health check)
+backend/    Django project (config/) and apps (apps/accounts, apps/core)
 frontend/   Vite React app
 docker-compose.yml   local development stack
 render.yaml          Render Blueprint for production
@@ -65,6 +65,39 @@ docker compose exec backend python manage.py test
 docker compose exec frontend npm run lint
 docker compose exec frontend npm run build
 ```
+
+Backend tests need PostgreSQL, so run them through Docker Compose as above
+rather than with a local Python install.
+
+## Backend
+
+```
+backend/
+  config/          settings, URLs, WSGI/ASGI, env.py (environment helpers), tests.py
+  apps/accounts/   custom User model (AUTH_USER_MODEL = "accounts.User")
+  apps/core/       health check, TimeStampedModel
+```
+
+- **Settings** live in one file, `config/settings.py`, and every
+  environment-specific value comes from an environment variable read through
+  `config/env.py`.
+- **Users:** always refer to the user model with `settings.AUTH_USER_MODEL` (in
+  model fields) or `get_user_model()` (in code), never by importing Django's
+  default `User`.
+- **Timestamps:** models that need `created_at` / `updated_at` inherit from
+  `apps.core.models.TimeStampedModel`.
+- **API defaults:** endpoints require authentication unless they set
+  `permission_classes` explicitly, and list endpoints are paginated 50 per page.
+
+### Adding an app
+
+```sh
+docker compose exec backend sh -c "mkdir apps/<name> && python manage.py startapp <name> apps/<name>"
+```
+
+Then in `apps/<name>/apps.py` set `name = "apps.<name>"`, add `"apps.<name>"`
+to `INSTALLED_APPS`, and create migrations with
+`docker compose exec backend python manage.py makemigrations <name>`.
 
 ## Configuration
 

@@ -15,7 +15,8 @@ RUN pip install -r requirements.txt
 COPY . .
 
 # Placeholder values only satisfy settings validation during the build.
-RUN DJANGO_SECRET_KEY=build-only DATABASE_URL=sqlite:////tmp/build.sqlite3 \
+# collectstatic never connects to the database.
+RUN DJANGO_SECRET_KEY=build-only DATABASE_URL=postgres://build:build@localhost:5432/build \
     python manage.py collectstatic --noinput
 
 USER app
