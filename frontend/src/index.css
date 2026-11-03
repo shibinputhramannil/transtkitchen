@@ -8,6 +8,8 @@
   --ok-text: #166534;
   --error-bg: #fee2e2;
   --error-text: #b91c1c;
+  --warning-bg: #fef3c7;
+  --warning-text: #92400e;
 
   color-scheme: light dark;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -25,6 +27,8 @@
     --ok-text: #bbf7d0;
     --error-bg: #7f1d1d;
     --error-text: #fecaca;
+    --warning-bg: #78350f;
+    --warning-text: #fde68a;
   }
 }
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router'
-import { errorMessages, listMembers, listOrganizations } from '../api/client.js'
+import { errorMessages, listMembers, listOrganizations, updateOrganization } from '../api/client.js'
 import FormErrors from '../components/FormErrors.jsx'
+import { timeZoneOptions } from '../timeZones.js'
 
 const ROLE_LABELS = { owner: 'Owner', manager: 'Manager', staff: 'Staff' }
 
@@ -56,6 +57,49 @@ function MemberList({ organizationId }) {
         </p>
       )}
     </>
+  )
+}
+
+// Everyone sees the time zone; only owners can change it (the server enforces this too).
+function TimeZoneSetting({ organization, onChanged }) {
+  const [value, setValue] = useState(organization.time_zone)
+  const [errors, setErrors] = useState([])
+  const [saving, setSaving] = useState(false)
+
+  if (organization.role !== 'owner') {
+    return <p className="muted">Time zone: {organization.time_zone}</p>
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (saving) return
+    setSaving(true)
+    setErrors([])
+    try {
+      onChanged(await updateOrganization(organization.id, { time_zone: value }))
+    } catch (error) {
+      setErrors(errorMessages(error))
+    }
+    setSaving(false)
+  }
+
+  return (
+    <form className="toolbar" onSubmit={handleSubmit}>
+      <label className="inline-label">
+        Time zone (expiry dates use this kitchen&apos;s local date)
+        <select value={value} onChange={(event) => setValue(event.target.value)}>
+          {timeZoneOptions(organization.time_zone).map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="submit" disabled={saving || value === organization.time_zone}>
+        {saving ? 'Saving…' : 'Save'}
+      </button>
+      <FormErrors errors={errors} />
+    </form>
   )
 }
 
@@ -127,6 +171,15 @@ export default function DashboardPage() {
           </select>
         </label>
       )}
+      <TimeZoneSetting
+        key={organization.id}
+        organization={organization}
+        onChanged={(updated) =>
+          setOrganizations((current) =>
+            current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
+          )
+        }
+      />
       <p>
         <Link className="button" to={`/organizations/${organization.id}/inventory`}>
           Inventory

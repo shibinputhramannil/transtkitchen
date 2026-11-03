@@ -178,7 +178,40 @@ select {
   font-size: 1rem;
 }
 
-.badge:not(.badge-ok):not(.badge-error) {
+.badge-warning {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.expiring {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.expiring h3 {
+  margin: 0 0 0.5rem;
+}
+
+.batch-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.batch-list li {
+  display: grid;
+  gap: 0.375rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.batch-list li:last-child {
+  border-bottom: none;
+}
+
+.badge:not(.badge-ok):not(.badge-error):not(.badge-warning) {
   background: var(--bg);
   border: 1px solid var(--border);
 }

@@ -129,8 +129,8 @@ export function listOrganizations() {
   return authRequest('GET', '/api/organizations/')
 }
 
-export function createOrganization(name) {
-  return authRequest('POST', '/api/organizations/', { name })
+export function createOrganization(name, timeZone) {
+  return authRequest('POST', '/api/organizations/', timeZone ? { name, time_zone: timeZone } : { name })
 }
 
 function organizationPath(organizationId, rest = '') {
@@ -143,6 +143,10 @@ function ingredientPath(organizationId, ingredientId, rest = '') {
 
 export function getOrganization(organizationId) {
   return authRequest('GET', organizationPath(organizationId))
+}
+
+export function updateOrganization(organizationId, changes) {
+  return authRequest('PATCH', organizationPath(organizationId), changes)
 }
 
 export function listMembers(organizationId) {
@@ -167,9 +171,10 @@ export function updateIngredient(organizationId, ingredientId, changes) {
 // Stock changes carry a request ID chosen once per submission. Sending the
 // same ID again (a retry after a lost response, or a token refresh) returns
 // the change already recorded instead of applying it twice.
-export function receiveStock(organizationId, ingredientId, { quantity, note, requestId }) {
+export function receiveStock(organizationId, ingredientId, { quantity, expiresOn, note, requestId }) {
   return authRequest('POST', ingredientPath(organizationId, ingredientId, 'receive/'), {
     quantity,
+    expires_on: expiresOn || null,
     note,
     request_id: requestId,
   })
@@ -186,4 +191,21 @@ export function countStock(
     note,
     request_id: requestId,
   })
+}
+
+export function listBatches(organizationId, ingredientId) {
+  return authRequest('GET', ingredientPath(organizationId, ingredientId, 'batches/'))
+}
+
+// Pass null as expiresOn to record that the batch has no expiry date.
+export function correctBatchExpiry(organizationId, ingredientId, batchId, { expiresOn, note }) {
+  return authRequest(
+    'PATCH',
+    ingredientPath(organizationId, ingredientId, `batches/${encodeURIComponent(batchId)}/`),
+    { expires_on: expiresOn, note },
+  )
+}
+
+export function listExpiring(organizationId, within = 3) {
+  return authRequest('GET', organizationPath(organizationId, `expiring/?within=${within}`))
 }

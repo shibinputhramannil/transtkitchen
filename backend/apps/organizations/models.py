@@ -1,7 +1,10 @@
 import uuid
 from datetime import timedelta
+from functools import cache
+from zoneinfo import ZoneInfo, available_timezones
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
 from django.utils import timezone
@@ -11,17 +14,33 @@ from apps.core.models import TimeStampedModel
 INVITATION_LIFETIME = timedelta(days=7)
 
 
+@cache
+def time_zone_names():
+    return frozenset(available_timezones())
+
+
+def validate_time_zone(value):
+    if value not in time_zone_names():
+        raise ValidationError(f"{value!r} is not a known time zone.", code="invalid")
+
+
 class Organization(TimeStampedModel):
     """A tenant: one restaurant, bakery, or cloud kitchen business."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=150)
+    # The kitchen's IANA time zone, e.g. "Europe/London". It decides what
+    # "today" means for expiry dates.
+    time_zone = models.CharField(max_length=64, default="UTC", validators=[validate_time_zone])
 
     class Meta:
         ordering = ["name", "created_at"]
 
     def __str__(self):
         return self.name
+
+    def local_today(self):
+        return timezone.now().astimezone(ZoneInfo(self.time_zone)).date()
 
 
 class Role(models.TextChoices):

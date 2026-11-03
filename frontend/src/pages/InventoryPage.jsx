@@ -1,17 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import {
+  correctBatchExpiry,
   countStock,
   createIngredient,
   errorMessages,
   getOrganization,
+  listBatches,
+  listExpiring,
   listIngredients,
   receiveStock,
   updateIngredient,
 } from '../api/client.js'
 import FormErrors from '../components/FormErrors.jsx'
+import { localDate } from '../timeZones.js'
 
 const UNITS = ['g', 'kg', 'ml', 'l', 'each']
+const SOURCE_LABELS = {
+  delivery: 'Delivery',
+  count: 'Found in a count',
+  opening: 'Stock from before batches',
+}
+
+// Expiry statuses come from the server, which uses the kitchen's local date.
+function ExpiryBadge({ status, expiresOn }) {
+  if (status === 'expired') return <span className="badge badge-error">Expired {expiresOn}</span>
+  if (status === 'expiring') return <span className="badge badge-warning">Expires {expiresOn}</span>
+  if (status === 'ok') return <span className="badge">Expires {expiresOn}</span>
+  return <span className="badge">No expiry recorded</span>
+}
 
 // "12.500" -> "12.5", "3.000" -> "3"; quantities stay strings, so no precision is lost.
 function formatQuantity(quantity) {
@@ -91,11 +108,12 @@ function IngredientForm({ initial, submitLabel, onSubmit, onCancel }) {
 // Records a delivery or a count. The request ID is chosen when the form opens
 // and kept for every retry, so submitting again after an error or a lost
 // response can never apply the change twice.
-function StockForm({ organizationId, ingredient, kind, onSaved, onConflict, onCancel }) {
+function StockForm({ organizationId, timeZone, ingredient, kind, onSaved, onConflict, onCancel }) {
   const [requestId] = useState(() => crypto.randomUUID())
   // A count is checked against the stock level the counter started from.
   const [expectedQuantity] = useState(ingredient.quantity_on_hand)
   const [quantity, setQuantity] = useState('')
+  const [expiresOn, setExpiresOn] = useState('')
   const [note, setNote] = useState('')
   const [errors, setErrors] = useState([])
   const [submitting, setSubmitting] = useState(false)
@@ -117,7 +135,7 @@ function StockForm({ organizationId, ingredient, kind, onSaved, onConflict, onCa
             note,
             requestId,
           })
-        : await receiveStock(organizationId, ingredient.id, { quantity, note, requestId })
+        : await receiveStock(organizationId, ingredient.id, { quantity, expiresOn, note, requestId })
       onSaved(movement)
     } catch (error) {
       if (error.status === 409) {
@@ -148,6 +166,17 @@ function StockForm({ organizationId, ingredient, kind, onSaved, onConflict, onCa
             onChange={(event) => setQuantity(event.target.value)}
           />
         </label>
+        {!isCount && (
+          <label>
+            Expiry date (optional)
+            <input
+              type="date"
+              min={localDate(timeZone)}
+              value={expiresOn}
+              onChange={(event) => setExpiresOn(event.target.value)}
+            />
+          </label>
+        )}
         <label>
           Note
           <input maxLength={255} value={note} onChange={(event) => setNote(event.target.value)} />
@@ -166,8 +195,126 @@ function StockForm({ organizationId, ingredient, kind, onSaved, onConflict, onCa
   )
 }
 
-function IngredientRow({ organizationId, ingredient, canManage, onChanged, onReload }) {
-  // null, 'receive', 'count', or 'edit'.
+function ExpiryCorrectionForm({ organizationId, ingredientId, batch, onSaved, onCancel }) {
+  const [expiresOn, setExpiresOn] = useState(batch.expires_on ?? '')
+  const [note, setNote] = useState('')
+  const [errors, setErrors] = useState([])
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
+    setErrors([])
+    try {
+      // An empty date records that the batch has no expiry date. Repeating a
+      // correction is harmless: the same date changes nothing.
+      await correctBatchExpiry(organizationId, ingredientId, batch.id, {
+        expiresOn: expiresOn || null,
+        note,
+      })
+      onSaved()
+    } catch (error) {
+      setErrors(errorMessages(error))
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form className="form inline-form" onSubmit={handleSubmit}>
+      <div className="form-row">
+        <label>
+          Expiry date (empty for none)
+          <input type="date" value={expiresOn} onChange={(event) => setExpiresOn(event.target.value)} />
+        </label>
+        <label>
+          Reason
+          <input maxLength={200} value={note} onChange={(event) => setNote(event.target.value)} />
+        </label>
+      </div>
+      <FormErrors errors={errors} />
+      <div className="actions">
+        <button type="submit" disabled={submitting}>
+          {submitting ? 'Saving…' : 'Correct expiry date'}
+        </button>
+        <button type="button" onClick={onCancel} disabled={submitting}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  )
+}
+
+function BatchList({ organizationId, ingredient, canManage, onChanged }) {
+  const [result, setResult] = useState(null)
+  const [errors, setErrors] = useState([])
+  const [correcting, setCorrecting] = useState(null)
+  const [reloadCount, setReloadCount] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    listBatches(organizationId, ingredient.id).then(
+      (data) => {
+        if (!cancelled) setResult(data)
+      },
+      (error) => {
+        if (!cancelled) setErrors(errorMessages(error))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId, ingredient.id, ingredient.quantity_on_hand, reloadCount])
+
+  if (errors.length) return <FormErrors errors={errors} />
+  if (!result) return <p>Loading batches…</p>
+  if (!result.results.length) return <p className="muted">No stock in any batch.</p>
+
+  return (
+    <ul className="batch-list">
+      {result.results.map((batch) => (
+        <li key={batch.id}>
+          <div className="ingredient-summary">
+            <span>
+              <strong>
+                {formatQuantity(batch.quantity_remaining)} {ingredient.unit}
+              </strong>
+              <span className="muted">
+                {' '}
+                of {formatQuantity(batch.quantity_received)} · {SOURCE_LABELS[batch.source]} ·{' '}
+                {new Date(batch.received_at).toLocaleDateString()}
+              </span>
+            </span>
+            <ExpiryBadge status={batch.status} expiresOn={batch.expires_on} />
+          </div>
+          {canManage && correcting !== batch.id && (
+            <div className="actions">
+              <button type="button" onClick={() => setCorrecting(batch.id)}>
+                Correct expiry date
+              </button>
+            </div>
+          )}
+          {correcting === batch.id && (
+            <ExpiryCorrectionForm
+              organizationId={organizationId}
+              ingredientId={ingredient.id}
+              batch={batch}
+              onSaved={() => {
+                setCorrecting(null)
+                setReloadCount((count) => count + 1)
+                onChanged()
+              }}
+              onCancel={() => setCorrecting(null)}
+            />
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChanged, onReload }) {
+  // null, 'receive', 'count', 'edit', or 'batches'.
   const [open, setOpen] = useState(null)
   const [archiveErrors, setArchiveErrors] = useState([])
   const [archiving, setArchiving] = useState(false)
@@ -205,9 +352,21 @@ function IngredientRow({ organizationId, ingredient, canManage, onChanged, onRel
           )}
         </span>
       </div>
-      {open === null && (
+      {ingredient.next_expiry && (
+        <div className="ingredient-name">
+          {Number(ingredient.expired_quantity) > 0 && (
+            <span className="badge badge-error">
+              {formatQuantity(ingredient.expired_quantity)} {ingredient.unit} expired
+            </span>
+          )}
+          {ingredient.expiry_status !== 'expired' && (
+            <ExpiryBadge status={ingredient.expiry_status} expiresOn={ingredient.next_expiry} />
+          )}
+        </div>
+      )}
+      {(open === null || open === 'batches') && (
         <div className="actions">
-          {ingredient.is_active && (
+          {open === null && ingredient.is_active && (
             <>
               <button type="button" onClick={() => setOpen('receive')}>
                 Receive
@@ -217,7 +376,14 @@ function IngredientRow({ organizationId, ingredient, canManage, onChanged, onRel
               </button>
             </>
           )}
-          {canManage && (
+          <button
+            type="button"
+            aria-expanded={open === 'batches'}
+            onClick={() => setOpen(open === 'batches' ? null : 'batches')}
+          >
+            {open === 'batches' ? 'Hide batches' : 'Batches'}
+          </button>
+          {open === null && canManage && (
             <>
               <button type="button" onClick={() => setOpen('edit')}>
                 Edit
@@ -229,10 +395,19 @@ function IngredientRow({ organizationId, ingredient, canManage, onChanged, onRel
           )}
         </div>
       )}
+      {open === 'batches' && (
+        <BatchList
+          organizationId={organizationId}
+          ingredient={ingredient}
+          canManage={canManage}
+          onChanged={onReload}
+        />
+      )}
       <FormErrors errors={archiveErrors} />
       {(open === 'receive' || open === 'count') && (
         <StockForm
           organizationId={organizationId}
+          timeZone={timeZone}
           ingredient={ingredient}
           kind={open}
           onSaved={(movement) => {
@@ -261,6 +436,49 @@ function IngredientRow({ organizationId, ingredient, canManage, onChanged, onRel
         />
       )}
     </li>
+  )
+}
+
+function ExpiringSoon({ organizationId, reloadKey }) {
+  const [result, setResult] = useState(null)
+  const [errors, setErrors] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    listExpiring(organizationId).then(
+      (data) => {
+        if (!cancelled) setResult(data)
+      },
+      (error) => {
+        if (!cancelled) setErrors(errorMessages(error))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId, reloadKey])
+
+  return (
+    <section className="expiring" aria-labelledby="expiring-heading">
+      <h3 id="expiring-heading">Expired or expiring within 3 days</h3>
+      <FormErrors errors={errors} />
+      {!result && !errors.length && <p>Loading…</p>}
+      {result && !result.results.length && <p className="muted">Nothing is expiring soon.</p>}
+      {result && result.results.length > 0 && (
+        <ul className="batch-list">
+          {result.results.map((batch) => (
+            <li key={batch.id} className="ingredient-summary">
+              <span>
+                <strong>{batch.ingredient.name}</strong> · {formatQuantity(batch.quantity_remaining)}{' '}
+                {batch.ingredient.unit}
+              </span>
+              <ExpiryBadge status={batch.status} expiresOn={batch.expires_on} />
+            </li>
+          ))}
+        </ul>
+      )}
+      {result?.next && <p className="muted">Showing the first {result.results.length} of {result.count}.</p>}
+    </section>
   )
 }
 
@@ -347,6 +565,8 @@ export default function InventoryPage() {
         </Link>
       </div>
 
+      <ExpiringSoon organizationId={organizationId} reloadKey={reloadCount} />
+
       {canManage &&
         (adding ? (
           <IngredientForm
@@ -403,6 +623,7 @@ export default function InventoryPage() {
               <IngredientRow
                 key={ingredient.id}
                 organizationId={organizationId}
+                timeZone={organization.time_zone}
                 ingredient={ingredient}
                 canManage={canManage}
                 onChanged={replaceIngredient}

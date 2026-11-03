@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { createOrganization, errorMessages } from '../api/client.js'
 import FormErrors from '../components/FormErrors.jsx'
+import { browserTimeZone } from '../timeZones.js'
 
 export default function CreateOrganizationPage() {
   const navigate = useNavigate()
@@ -14,7 +15,16 @@ export default function CreateOrganizationPage() {
     setSubmitting(true)
     setErrors([])
     try {
-      const organization = await createOrganization(name)
+      let organization
+      try {
+        // Expiry dates follow the kitchen's local date; start from this browser's time zone.
+        organization = await createOrganization(name, browserTimeZone())
+      } catch (error) {
+        if (!error.data?.time_zone) throw error
+        // The server does not know this browser's zone name; start in UTC instead.
+        // The owner can change it on the dashboard.
+        organization = await createOrganization(name)
+      }
       navigate('/', { state: { organizationId: organization.id } })
     } catch (error) {
       setErrors(errorMessages(error))

@@ -4,9 +4,10 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 4a (ingredients and inventory).** People can register, sign
-> in, create an organization, manage its ingredients, and record deliveries
-> and stock counts. Expiry tracking, sales imports, and waste logging come next.
+> **Status: Phase 4b (expiry tracking).** People can register, sign in, create
+> an organization, manage its ingredients, record deliveries with expiry dates
+> and stock counts, and see what is expired or expiring. Sales imports and
+> waste logging come next.
 
 ## Stack
 
@@ -80,7 +81,8 @@ backend/
   apps/core/            health check, TimeStampedModel, testing.py (API test base)
   apps/organizations/   tenants: organizations, memberships and roles, invitations,
                         testing.py (two-tenant test fixtures)
-  apps/inventory/       ingredients and their stock history
+  apps/inventory/       ingredients, stock batches and expiry, stock history;
+                        stock.py holds the rules every stock change follows
 ```
 
 - **Settings** live in one file, `config/settings.py`, and every
@@ -222,13 +224,49 @@ connection, and disables the button while a submission is in flight.
 Deliveries, counts, unit changes, and deletions of one ingredient lock its row,
 so simultaneous requests are applied one at a time.
 
+### Batches and expiry dates
+
+Each organization has a **time zone** (an IANA name such as `Europe/London`,
+default `UTC`). A new organization takes the creator's browser time zone, and
+owners can change it on the dashboard. "Today", for everything about expiry,
+is the date in that time zone.
+
+Stock is held in **batches**:
+
+- Every delivery creates its own batch. `expires_on` is optional (salt and dry
+  goods have none); when given, it may not be in the past or more than 5 years
+  ahead. Food can be used through its expiry date.
+- A count that finds less stock than recorded takes the difference from
+  batches **earliest expiry first**: expired stock first, then soonest-expiring,
+  then batches without an expiry date, oldest delivery first.
+- A count that finds more stock than recorded adds a batch with no expiry date.
+- Stock that existed before batch tracking was moved into one opening batch
+  per ingredient with no expiry date. Earlier stock history is unchanged.
+
+Each stock change records **lines** saying how much it added to or took from
+each batch, so every batch can be traced. An ingredient's stock always equals
+the sum of its batches; `apps.inventory.stock.stock_problems()` checks this and
+the other consistency rules.
+
+Managers and owners can **correct a batch's expiry date** (for example, a
+misread label). The correction is recorded in the stock history with the old
+and new dates; past dates are allowed here.
+
+A batch's status is `expired` (after its expiry date), `expiring` (within 3
+days), `ok`, or `no_expiry`. The inventory screen lists everything expired or
+expiring within 3 days, and each ingredient shows its next expiry date and how
+much of it has expired.
+
 | Endpoint (under `/api/organizations/<id>/`)   | Methods            |
 | --------------------------------------------- | ------------------ |
 | `ingredients/` (`?search=`, `?archived=true`) | GET, POST          |
 | `ingredients/<ingredient id>/`                | GET, PATCH, DELETE |
-| `ingredients/<ingredient id>/receive/`        | POST               |
+| `ingredients/<ingredient id>/receive/`        | POST (`expires_on` optional) |
 | `ingredients/<ingredient id>/count/`          | POST               |
 | `ingredients/<ingredient id>/movements/`      | GET                |
+| `ingredients/<ingredient id>/batches/` (`?include_empty=true`) | GET |
+| `ingredients/<ingredient id>/batches/<batch id>/` | PATCH (managers and owners) |
+| `expiring/` (`?within=` 0–30 days, default 3) | GET                |
 
 ### Not built yet
 
@@ -238,9 +276,10 @@ so simultaneous requests are applied one at a time.
   admin.
 - Member management and invitation screens in the frontend; staying signed in
   across reloads; frontend unit tests.
-- Inventory: expiry dates and batches, sales imports, waste logging, a stock
-  history screen (the API has it), unit conversions and purchase units (cases,
-  packs), costs, suppliers, and multiple locations per organization.
+- Inventory: sales imports, waste logging, a stock history screen (the API has
+  it), counting batch by batch, expiry notifications, unit conversions and
+  purchase units (cases, packs), costs, suppliers, and multiple locations per
+  organization.
 - Multi-factor authentication, account lockout, deleting organizations, a
   Content Security Policy for the static site, and database row-level security.
 - Rate-limit counters are kept per server process, and clients are identified

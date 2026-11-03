@@ -1,5 +1,6 @@
 import threading
 import uuid
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib import admin
@@ -14,6 +15,7 @@ from apps.organizations.models import Membership, Organization, Role
 from apps.organizations.testing import PASSWORD, TenantTestCase, make_user, org_url
 
 from .models import Ingredient, MovementKind, StockMovement, Unit
+from .stock import record_stock_change, stock_problems
 
 
 def ingredient_url(name, ingredient, organization=None):
@@ -28,16 +30,15 @@ def count_data(counted, **extra):
     return {"counted_quantity": str(counted), "request_id": str(uuid.uuid4()), **extra}
 
 
-def add_movement(ingredient, change, kind=MovementKind.RECEIVE):
-    ingredient.quantity_on_hand += Decimal(change)
-    ingredient.save()
-    return StockMovement.objects.create(
-        ingredient=ingredient,
-        kind=kind,
-        quantity_change=Decimal(change),
-        quantity_after=ingredient.quantity_on_hand,
-        request_id=uuid.uuid4(),
-    )
+def add_movement(ingredient, change, kind=MovementKind.RECEIVE, expires_on=None):
+    """Records a stock change the way the API does, batches included."""
+    with transaction.atomic():
+        locked = Ingredient.objects.select_for_update().get(pk=ingredient.pk)
+        movement = record_stock_change(
+            locked, kind=kind, change=Decimal(change), request_id=uuid.uuid4(), expires_on=expires_on
+        )
+    ingredient.refresh_from_db()
+    return movement
 
 
 class InventoryTestCase(TenantTestCase):
@@ -553,6 +554,41 @@ class ConcurrentStockChangeTests(TransactionTestCase):
             sorted(self.flour.movements.values_list("quantity_after", flat=True)),
             [Decimal("1.5") * step for step in range(1, 9)],
         )
+        self.assertEqual(self.flour.batches.count(), 8)
+        self.assertEqual(stock_problems(self.flour), [])
+
+    def test_simultaneous_deliveries_with_expiry_dates_get_their_own_batches(self):
+        url = ingredient_url("ingredient-receive", self.flour)
+        today = self.flour.organization.local_today()
+        dates = [today + timedelta(days=offset) for offset in (5, 2, 9, 2)]
+
+        statuses = self.run_together(
+            *[
+                (self.cook, "post", url, receive_data("1", expires_on=expires_on.isoformat()))
+                for expires_on in dates
+            ]
+        )
+
+        self.assertEqual(statuses, [201] * 4)
+        self.assertEqual(
+            sorted(self.flour.batches.values_list("expires_on", flat=True)), sorted(dates)
+        )
+        self.flour.refresh_from_db()
+        self.assertEqual(stock_problems(self.flour), [])
+
+    def test_count_during_deliveries_keeps_batches_consistent(self):
+        add_movement(self.flour, "10", expires_on=self.flour.organization.local_today() + timedelta(days=3))
+        receive = ingredient_url("ingredient-receive", self.flour)
+
+        statuses = self.run_together(
+            (self.cook, "post", receive, receive_data("2")),
+            (self.cook, "post", ingredient_url("ingredient-count", self.flour), count_data("4")),
+            (self.cook, "post", receive, receive_data("3")),
+        )
+
+        self.assertEqual(statuses, [201] * 3)
+        self.flour.refresh_from_db()
+        self.assertEqual(stock_problems(self.flour), [])
 
     def test_simultaneous_duplicate_submissions_apply_once(self):
         url = ingredient_url("ingredient-receive", self.flour)
@@ -564,6 +600,8 @@ class ConcurrentStockChangeTests(TransactionTestCase):
         self.flour.refresh_from_db()
         self.assertEqual(self.flour.quantity_on_hand, Decimal("2"))
         self.assertEqual(self.flour.movements.count(), 1)
+        self.assertEqual(self.flour.batches.count(), 1)
+        self.assertEqual(stock_problems(self.flour), [])
 
     def test_deletion_and_delivery_never_interleave(self):
         statuses = self.run_together(

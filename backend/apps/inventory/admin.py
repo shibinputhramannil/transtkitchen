@@ -1,16 +1,26 @@
 from django.contrib import admin
 
-from .models import Ingredient, StockMovement
+from .models import Ingredient, MovementLine, StockBatch, StockMovement
 
 MOVEMENT_FIELDS = [
     "kind",
     "quantity_change",
     "quantity_after",
+    "expires_on",
     "note",
     "created_by",
     "created_at",
     "request_id",
 ]
+BATCH_FIELDS = [
+    "source",
+    "quantity_received",
+    "quantity_remaining",
+    "expires_on",
+    "received_at",
+    "source_movement",
+]
+LINE_FIELDS = ["batch", "quantity_change"]
 
 
 class ReadOnlyAdminMixin:
@@ -28,8 +38,23 @@ class ReadOnlyAdminMixin:
 
 class StockMovementInline(ReadOnlyAdminMixin, admin.TabularInline):
     model = StockMovement
+    fk_name = "ingredient"
     fields = MOVEMENT_FIELDS
     readonly_fields = MOVEMENT_FIELDS
+    extra = 0
+
+
+class StockBatchInline(ReadOnlyAdminMixin, admin.TabularInline):
+    model = StockBatch
+    fields = BATCH_FIELDS
+    readonly_fields = BATCH_FIELDS
+    extra = 0
+
+
+class MovementLineInline(ReadOnlyAdminMixin, admin.TabularInline):
+    model = MovementLine
+    fields = LINE_FIELDS
+    readonly_fields = LINE_FIELDS
     extra = 0
 
 
@@ -40,7 +65,7 @@ class IngredientAdmin(admin.ModelAdmin):
     list_select_related = ["organization"]
     search_fields = ["name", "organization__name"]
     autocomplete_fields = ["organization"]
-    inlines = [StockMovementInline]
+    inlines = [StockBatchInline, StockMovementInline]
 
     def get_readonly_fields(self, request, obj=None):
         # Stock changes only through movements, and the unit is fixed once there are any.
@@ -55,4 +80,13 @@ class StockMovementAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ["ingredient", "kind", "quantity_change", "quantity_after", "created_by", "created_at"]
     list_filter = ["kind"]
     list_select_related = ["ingredient", "created_by"]
+    search_fields = ["ingredient__name", "ingredient__organization__name"]
+    inlines = [MovementLineInline]
+
+
+@admin.register(StockBatch)
+class StockBatchAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = ["ingredient", "source", "quantity_remaining", "expires_on", "received_at"]
+    list_filter = ["source"]
+    list_select_related = ["ingredient"]
     search_fields = ["ingredient__name", "ingredient__organization__name"]
