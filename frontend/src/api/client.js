@@ -13,13 +13,16 @@ function requestError(status, data = null) {
   return error
 }
 
-async function send(method, path, { body, token } = {}) {
+// A FormData body is sent as a file upload; anything else as JSON. With
+// `text`, a successful response is returned as text instead of parsed JSON.
+async function send(method, path, { body, token, text = false } = {}) {
   if (!API_URL) {
     throw new Error('VITE_API_URL is not configured')
   }
 
-  const headers = { Accept: 'application/json' }
-  if (body !== undefined) {
+  const isForm = body instanceof FormData
+  const headers = { Accept: text ? 'text/csv, application/json' : 'application/json' }
+  if (body !== undefined && !isForm) {
     headers['Content-Type'] = 'application/json'
   }
   if (token) {
@@ -29,8 +32,11 @@ async function send(method, path, { body, token } = {}) {
   const response = await fetch(`${API_URL}${path}`, {
     method,
     headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined || isForm ? body : JSON.stringify(body),
   })
+  if (response.ok && text) {
+    return response.text()
+  }
   const data = response.status === 204 ? null : await response.json().catch(() => null)
 
   if (!response.ok) {
@@ -62,13 +68,13 @@ function refreshTokens() {
 // Sends a request as the signed-in user. If the access token has expired, it
 // is refreshed once and the request retried; if that fails, the user is
 // signed out.
-async function authRequest(method, path, body) {
+async function authRequest(method, path, body, { text = false } = {}) {
   const tokens = getTokens()
   if (!tokens) {
     throw requestError(401)
   }
   try {
-    return await send(method, path, { body, token: tokens.access })
+    return await send(method, path, { body, token: tokens.access, text })
   } catch (error) {
     if (error.status !== 401) {
       throw error
@@ -77,7 +83,7 @@ async function authRequest(method, path, body) {
 
   await refreshTokens()
   try {
-    return await send(method, path, { body, token: getTokens()?.access })
+    return await send(method, path, { body, token: getTokens()?.access, text })
   } catch (error) {
     if (error.status === 401) {
       clearTokens()
@@ -208,4 +214,105 @@ export function correctBatchExpiry(organizationId, ingredientId, batchId, { expi
 
 export function listExpiring(organizationId, within = 3) {
   return authRequest('GET', organizationPath(organizationId, `expiring/?within=${within}`))
+}
+
+// Every active ingredient, following pagination (for pickers such as the recipe editor).
+export async function listAllIngredients(organizationId) {
+  const all = []
+  for (let page = 1; page <= 40; page += 1) {
+    const data = await listIngredients(organizationId, { page })
+    all.push(...data.results)
+    if (!data.next) break
+  }
+  return all
+}
+
+function menuItemPath(organizationId, menuItemId, rest = '') {
+  return organizationPath(organizationId, `menu-items/${encodeURIComponent(menuItemId)}/${rest}`)
+}
+
+export function listMenuItems(organizationId, { archived = false, page = 1 } = {}) {
+  const params = new URLSearchParams({ page: String(page) })
+  if (archived) params.set('archived', 'true')
+  return authRequest('GET', organizationPath(organizationId, `menu-items/?${params}`))
+}
+
+export async function listAllMenuItems(organizationId) {
+  const all = []
+  for (let page = 1; page <= 40; page += 1) {
+    const data = await listMenuItems(organizationId, { page })
+    all.push(...data.results)
+    if (!data.next) break
+  }
+  return all
+}
+
+export function createMenuItem(organizationId, name) {
+  return authRequest('POST', organizationPath(organizationId, 'menu-items/'), { name })
+}
+
+export function updateMenuItem(organizationId, menuItemId, changes) {
+  return authRequest('PATCH', menuItemPath(organizationId, menuItemId), changes)
+}
+
+// lines: [{ ingredient: id, quantity, unit }]; replaces the whole recipe.
+export function saveRecipe(organizationId, menuItemId, lines) {
+  return authRequest('PUT', menuItemPath(organizationId, menuItemId, 'recipe/'), { lines })
+}
+
+function salesImportPath(organizationId, importId, rest = '') {
+  return organizationPath(organizationId, `sales-imports/${encodeURIComponent(importId)}/${rest}`)
+}
+
+export function uploadSalesImport(organizationId, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return authRequest('POST', organizationPath(organizationId, 'sales-imports/'), form)
+}
+
+export function listSalesImports(organizationId) {
+  return authRequest('GET', organizationPath(organizationId, 'sales-imports/'))
+}
+
+export function getSalesImport(organizationId, importId) {
+  return authRequest('GET', salesImportPath(organizationId, importId))
+}
+
+export function listSalesImportRows(organizationId, importId, status) {
+  return authRequest('GET', salesImportPath(organizationId, importId, `rows/?status=${encodeURIComponent(status)}`))
+}
+
+// Map every row with this item name to a menu item (remembered for later
+// imports), or pass menuItemId null to ignore those rows in this import.
+export function mapSalesImportItem(organizationId, importId, itemName, menuItemId) {
+  return authRequest(
+    'POST',
+    salesImportPath(organizationId, importId, 'mappings/'),
+    menuItemId ? { item_name: itemName, menu_item: menuItemId } : { item_name: itemName, ignore: true },
+  )
+}
+
+// Matches a draft's rows again against the current menu and remembered names.
+// Viewing a preview never does this; repeating it changes nothing further.
+export function rematchSalesImport(organizationId, importId) {
+  return authRequest('POST', salesImportPath(organizationId, importId, 'rematch/'))
+}
+
+// Applying again after success returns the stored result, so retries are safe.
+export function applySalesImport(organizationId, importId, acknowledged) {
+  return authRequest('POST', salesImportPath(organizationId, importId, 'apply/'), { acknowledged })
+}
+
+export function discardSalesImport(organizationId, importId) {
+  return authRequest('POST', salesImportPath(organizationId, importId, 'discard/'))
+}
+
+export function getSalesTemplate(organizationId) {
+  return authRequest('GET', organizationPath(organizationId, 'sales-imports/template.csv'), undefined, {
+    text: true,
+  })
+}
+
+export function getDailySales(organizationId) {
+  return authRequest('GET', organizationPath(organizationId, 'sales/daily/'))
 }

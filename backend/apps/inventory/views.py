@@ -23,6 +23,7 @@ from .serializers import (
     StockMovementSerializer,
 )
 from .stock import record_stock_change
+from .units import compatible, measure
 
 # Expiry dates further ahead than this are almost certainly typos.
 MAX_EXPIRY_YEARS = 5
@@ -131,9 +132,18 @@ class IngredientDetailView(IngredientScopedMixin, generics.RetrieveUpdateDestroy
             raise ValidationError(
                 {"unit": ["The unit cannot change once the ingredient has stock history."]}
             )
+        if not compatible(unit, ingredient.unit) and ingredient.recipe_lines.exists():
+            raise ValidationError(
+                {"unit": ["Recipes use this ingredient, so its unit must stay a "
+                          f"{measure(ingredient.unit)} unit."]}
+            )
         self.save_ingredient(serializer)
 
     def perform_destroy(self, instance):
+        if instance.recipe_lines.exists():
+            raise ValidationError(
+                {"detail": "Recipes use this ingredient. Remove it from them, or archive it instead."}
+            )
         if instance.movements.exists():
             raise ValidationError(
                 {"detail": "This ingredient has stock history and cannot be deleted. Archive it instead."}

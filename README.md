@@ -4,10 +4,10 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 4b (expiry tracking).** People can register, sign in, create
-> an organization, manage its ingredients, record deliveries with expiry dates
-> and stock counts, and see what is expired or expiring. Sales imports and
-> waste logging come next.
+> **Status: Phase 4c (sales imports).** People can register, sign in, create
+> an organization, manage ingredients and stock with expiry dates, build menu
+> items with recipes, and import sales from CSV files, which deducts the
+> ingredients they used. Waste logging comes next.
 
 ## Stack
 
@@ -20,7 +20,7 @@ tracking, and waste logging.
 | Hosting  | Render: static site + Docker web service + Postgres |
 
 ```
-backend/    Django project (config/) and apps (accounts, core, organizations, inventory)
+backend/    Django project (config/) and apps (accounts, core, organizations, inventory, menu, sales)
 frontend/   Vite React app
 docker-compose.yml   local development stack
 render.yaml          Render Blueprint for production
@@ -82,7 +82,10 @@ backend/
   apps/organizations/   tenants: organizations, memberships and roles, invitations,
                         testing.py (two-tenant test fixtures)
   apps/inventory/       ingredients, stock batches and expiry, stock history;
-                        stock.py holds the rules every stock change follows
+                        stock.py holds the rules every stock change follows,
+                        units.py the unit conversions
+  apps/menu/            menu items, recipes, and remembered sales item names
+  apps/sales/           sales imports: CSV parsing, preview, applying, reports
 ```
 
 - **Settings** live in one file, `config/settings.py`, and every
@@ -268,6 +271,105 @@ much of it has expired.
 | `ingredients/<ingredient id>/batches/<batch id>/` | PATCH (managers and owners) |
 | `expiring/` (`?within=` 0–30 days, default 3) | GET                |
 
+## Menu and recipes
+
+Each organization has **menu items**, and each item has a **recipe**: how much
+of each ingredient one portion uses. A recipe line may use a different unit
+from the ingredient's stock unit, as long as both measure the same thing:
+grams and kilograms, millilitres and litres, or counted items (`each`). Recipes
+can only use the organization's own ingredients. An ingredient used in a recipe
+cannot be deleted or switched to a different kind of unit (kg to l).
+
+Staff can see the menu; managers and owners edit it. Items that appear in
+imported sales can be archived but not deleted.
+
+| Endpoint (under `/api/organizations/<id>/`)   | Methods                       |
+| --------------------------------------------- | ----------------------------- |
+| `menu-items/` (`?search=`, `?archived=true`)  | GET, POST                     |
+| `menu-items/<id>/`                            | GET, PATCH, DELETE            |
+| `menu-items/<id>/recipe/`                     | GET, PUT (replaces the recipe) |
+
+## Sales imports
+
+Managers and owners import sales from a CSV file; staff can view imports and
+reports. The file needs a header row with `date`, `item`, and `quantity`
+(matched ignoring case; `item_id` is optional, other columns are ignored):
+
+```
+date,item,quantity,item_id
+2026-11-02,Margherita Pizza,14,
+2026-11-02T19:30:00+05:30,Flat White,2,SKU-118
+```
+
+- `date` is either the kitchen-local business date (`YYYY-MM-DD`) or an ISO
+  date-time. With a UTC offset it is converted to the kitchen's time zone;
+  without one it is read as kitchen-local time. Other formats such as
+  `02/11/2026` are rejected.
+- `quantity` is a positive number with up to 3 decimal places. Refunds
+  (negative quantities) are not supported.
+- Files must be UTF-8 (Excel's "CSV UTF-8"), at most 2 MB and 5,000 rows.
+  Files with duplicate or empty column headers are rejected. These checks run
+  before anything is stored; the file itself is never stored, only its rows and
+  a hash of its contents.
+
+**1. Upload.** The upload creates a draft and shows a preview; nothing changes
+yet. Rows with problems are listed with their row number. Uploading the same
+file again returns the same draft (or 409 if it was already applied).
+
+**2. Match items.** When the file is uploaded, each row's item is matched to a
+menu item by a remembered item ID or name, or by the menu item's own name
+(ignoring case). Unmatched names must be mapped to a menu item, which is
+remembered for later imports, or ignored for this import.
+
+Viewing the preview never changes the draft. If menu items or remembered names
+change after the upload, the preview reports how many rows would now match
+differently (`rematch_available`); **Re-match names** (`POST .../rematch/`)
+updates them. Re-matching leaves ignored rows alone and is safe to repeat.
+Applying uses the matches exactly as the preview shows them.
+
+**3. Check warnings.** The preview lists what will be deducted per ingredient
+and these warnings, each of which must be acknowledged before applying:
+
+- `row_errors`: rows with errors will be left out.
+- `shortfalls`: recorded stock is not enough. The sales are still recorded,
+  stock is taken down to zero (never below), and the missing amount is
+  recorded as a shortfall. Count those ingredients afterwards.
+- `overlapping_dates`: another applied import already has sales on some of
+  these dates; if they are the same sales, applying counts them twice.
+- `counted_after_sales`: an ingredient was counted after a sale that used it,
+  so the count may already reflect that sale and deducting it again could
+  count it twice. A sale happened at its time if the file gave one, otherwise
+  at the start of its business date in the kitchen's time zone.
+
+Recipes that use archived ingredients block applying.
+
+**4. Apply.** Applying records the sales and deducts each ingredient from its
+batches, earliest expiry first, in one transaction: if anything fails,
+nothing is deducted and the import stays a draft. Stock is deducted from the
+batches that exist when the import is applied, so import sales daily. Applying
+an import that is already applied returns the result again without deducting
+twice, and two imports are applied one at a time. An applied import cannot be
+undone; correct stock with a count. Drafts can be discarded.
+
+The **sales report** gives the quantity sold per menu item per business date
+(kitchen-local), from applied imports.
+
+| Endpoint (under `/api/organizations/<id>/`)   | Methods                       |
+| --------------------------------------------- | ----------------------------- |
+| `sales-imports/`                              | GET, POST (form field `file`) |
+| `sales-imports/template.csv`                  | GET                           |
+| `sales-imports/<id>/` (preview)               | GET                           |
+| `sales-imports/<id>/rows/` (`?status=error\|unmatched\|ignored\|matched`) | GET |
+| `sales-imports/<id>/mappings/` (`{item_name, menu_item}` or `{item_name, ignore: true}`) | POST |
+| `sales-imports/<id>/rematch/`                 | POST                          |
+| `sales-imports/<id>/apply/` (`{acknowledged: [...]}`) | POST                  |
+| `sales-imports/<id>/discard/`                 | POST                          |
+| `sales/daily/` (`?from=`, `?to=`, up to 92 days; default the last 7) | GET    |
+
+Imports are designed to accept point-of-sale integrations later: each import
+records its `source` and a `source_reference` (for CSV files, the file's hash)
+that may be used only once.
+
 ### Not built yet
 
 - Email verification, password reset, and email invitations (they need an email
@@ -276,10 +378,12 @@ much of it has expired.
   admin.
 - Member management and invitation screens in the frontend; staying signed in
   across reloads; frontend unit tests.
-- Inventory: sales imports, waste logging, a stock history screen (the API has
-  it), counting batch by batch, expiry notifications, unit conversions and
-  purchase units (cases, packs), costs, suppliers, and multiple locations per
-  organization.
+- Inventory: waste logging, a stock history screen (the API has it), counting
+  batch by batch, expiry notifications, purchase units (cases, packs), costs,
+  suppliers, and multiple locations per organization.
+- Sales: point-of-sale integrations, choosing CSV columns, refunds, undoing an
+  applied import, a business day that ends after midnight, prices and revenue,
+  recipe sub-components and modifiers, and charts.
 - Multi-factor authentication, account lockout, deleting organizations, a
   Content Security Policy for the static site, and database row-level security.
 - Rate-limit counters are kept per server process, and clients are identified

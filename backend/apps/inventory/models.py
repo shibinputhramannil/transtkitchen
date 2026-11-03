@@ -93,6 +93,7 @@ class MovementKind(models.TextChoices):
     RECEIVE = "receive", "Delivery received"
     COUNT = "count", "Stock count"
     EXPIRY_CORRECTION = "expiry_correction", "Expiry date corrected"
+    SALE = "sale", "Used by sales"
 
 
 class StockMovement(TimeStampedModel):

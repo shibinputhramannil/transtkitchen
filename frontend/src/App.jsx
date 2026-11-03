@@ -4,6 +4,9 @@ import SystemStatus from './components/SystemStatus.jsx'
 import CreateOrganizationPage from './pages/CreateOrganizationPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import InventoryPage from './pages/InventoryPage.jsx'
+import MenuPage from './pages/MenuPage.jsx'
+import SalesImportPage from './pages/SalesImportPage.jsx'
+import SalesPage from './pages/SalesPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
 import './App.css'
@@ -60,6 +63,18 @@ function App() {
         <Route
           path="/organizations/:organizationId/inventory"
           element={<RequireAuth><InventoryPage /></RequireAuth>}
+        />
+        <Route
+          path="/organizations/:organizationId/menu"
+          element={<RequireAuth><MenuPage /></RequireAuth>}
+        />
+        <Route
+          path="/organizations/:organizationId/sales"
+          element={<RequireAuth><SalesPage /></RequireAuth>}
+        />
+        <Route
+          path="/organizations/:organizationId/sales/imports/:importId"
+          element={<RequireAuth><SalesImportPage /></RequireAuth>}
         />
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />

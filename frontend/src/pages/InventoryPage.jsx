@@ -13,6 +13,7 @@ import {
   updateIngredient,
 } from '../api/client.js'
 import FormErrors from '../components/FormErrors.jsx'
+import { formatQuantity } from '../format.js'
 import { localDate } from '../timeZones.js'
 
 const UNITS = ['g', 'kg', 'ml', 'l', 'each']
@@ -28,11 +29,6 @@ function ExpiryBadge({ status, expiresOn }) {
   if (status === 'expiring') return <span className="badge badge-warning">Expires {expiresOn}</span>
   if (status === 'ok') return <span className="badge">Expires {expiresOn}</span>
   return <span className="badge">No expiry recorded</span>
-}
-
-// "12.500" -> "12.5", "3.000" -> "3"; quantities stay strings, so no precision is lost.
-function formatQuantity(quantity) {
-  return quantity.includes('.') ? quantity.replace(/0+$/, '').replace(/\.$/, '') : quantity
 }
 
 function IngredientForm({ initial, submitLabel, onSubmit, onCancel }) {
