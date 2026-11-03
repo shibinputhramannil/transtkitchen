@@ -189,6 +189,80 @@ select {
   list-style: none;
 }
 
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.actions button {
+  margin-top: 0;
+}
+
+.inline-form {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.toolbar input[type='search'] {
+  flex: 1 1 12rem;
+  width: auto;
+}
+
+.toolbar button {
+  margin-top: 0;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.checkbox input {
+  width: auto;
+}
+
+.ingredient-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ingredient-list li {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.ingredient-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.ingredient-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+}
+
 .member-list li {
   display: flex;
   justify-content: space-between;

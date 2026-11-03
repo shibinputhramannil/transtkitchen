@@ -133,6 +133,57 @@ export function createOrganization(name) {
   return authRequest('POST', '/api/organizations/', { name })
 }
 
+function organizationPath(organizationId, rest = '') {
+  return `/api/organizations/${encodeURIComponent(organizationId)}/${rest}`
+}
+
+function ingredientPath(organizationId, ingredientId, rest = '') {
+  return organizationPath(organizationId, `ingredients/${encodeURIComponent(ingredientId)}/${rest}`)
+}
+
+export function getOrganization(organizationId) {
+  return authRequest('GET', organizationPath(organizationId))
+}
+
 export function listMembers(organizationId) {
-  return authRequest('GET', `/api/organizations/${encodeURIComponent(organizationId)}/members/`)
+  return authRequest('GET', organizationPath(organizationId, 'members/'))
+}
+
+export function listIngredients(organizationId, { search = '', archived = false, page = 1 } = {}) {
+  const params = new URLSearchParams({ page: String(page) })
+  if (search) params.set('search', search)
+  if (archived) params.set('archived', 'true')
+  return authRequest('GET', organizationPath(organizationId, `ingredients/?${params}`))
+}
+
+export function createIngredient(organizationId, ingredient) {
+  return authRequest('POST', organizationPath(organizationId, 'ingredients/'), ingredient)
+}
+
+export function updateIngredient(organizationId, ingredientId, changes) {
+  return authRequest('PATCH', ingredientPath(organizationId, ingredientId), changes)
+}
+
+// Stock changes carry a request ID chosen once per submission. Sending the
+// same ID again (a retry after a lost response, or a token refresh) returns
+// the change already recorded instead of applying it twice.
+export function receiveStock(organizationId, ingredientId, { quantity, note, requestId }) {
+  return authRequest('POST', ingredientPath(organizationId, ingredientId, 'receive/'), {
+    quantity,
+    note,
+    request_id: requestId,
+  })
+}
+
+export function countStock(
+  organizationId,
+  ingredientId,
+  { countedQuantity, expectedQuantity, note, requestId },
+) {
+  return authRequest('POST', ingredientPath(organizationId, ingredientId, 'count/'), {
+    counted_quantity: countedQuantity,
+    expected_quantity: expectedQuantity,
+    note,
+    request_id: requestId,
+  })
 }

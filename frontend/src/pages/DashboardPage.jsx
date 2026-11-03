@@ -127,6 +127,11 @@ export default function DashboardPage() {
           </select>
         </label>
       )}
+      <p>
+        <Link className="button" to={`/organizations/${organization.id}/inventory`}>
+          Inventory
+        </Link>
+      </p>
       <MemberList organizationId={organization.id} />
       <p>
         <Link to="/organizations/new">Create another organization</Link>

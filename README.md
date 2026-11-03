@@ -4,8 +4,9 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 3 (authentication and tenants).** People can register, sign
-> in, create an organization, and see its members. Kitchen features come next.
+> **Status: Phase 4a (ingredients and inventory).** People can register, sign
+> in, create an organization, manage its ingredients, and record deliveries
+> and stock counts. Expiry tracking, sales imports, and waste logging come next.
 
 ## Stack
 
@@ -18,7 +19,7 @@ tracking, and waste logging.
 | Hosting  | Render: static site + Docker web service + Postgres |
 
 ```
-backend/    Django project (config/) and apps (apps/accounts, apps/core, apps/organizations)
+backend/    Django project (config/) and apps (accounts, core, organizations, inventory)
 frontend/   Vite React app
 docker-compose.yml   local development stack
 render.yaml          Render Blueprint for production
@@ -77,7 +78,9 @@ backend/
   config/               settings, URLs, WSGI/ASGI, env.py (environment helpers), tests.py
   apps/accounts/        User model (sign-in by email), registration, JWT sign-in
   apps/core/            health check, TimeStampedModel, testing.py (API test base)
-  apps/organizations/   tenants: organizations, memberships and roles, invitations
+  apps/organizations/   tenants: organizations, memberships and roles, invitations,
+                        testing.py (two-tenant test fixtures)
+  apps/inventory/       ingredients and their stock history
 ```
 
 - **Settings** live in one file, `config/settings.py`, and every
@@ -177,7 +180,55 @@ class WasteEntryListCreateView(OrganizationScopedMixin, generics.ListCreateAPIVi
 ```
 
 Every such endpoint needs a test proving that a member of another organization
-gets a 404; `apps/organizations/tests.py` shows the pattern.
+gets a 404. `apps.organizations.testing.TenantTestCase` provides two
+organizations with an owner, manager, and staff member;
+`apps/inventory/tests.py` shows the pattern.
+
+## Inventory
+
+Each organization keeps a list of **ingredients**. Every ingredient has one
+unit (`g`, `kg`, `ml`, `l`, or `each`) used for all of its quantities; there
+are no unit conversions. Quantities are exact decimals with up to three
+decimal places (at most 999,999,999.999) and are returned as strings.
+
+Stock changes only by recording a **stock movement**:
+
+- **Receive** adds a delivery to stock.
+- **Count** sets stock to a counted quantity and records the difference. If the
+  request includes `expected_quantity` (the level the counter started from)
+  and stock has changed since, the count is refused with `409 Conflict` so a
+  delivery recorded meanwhile is not undone. The frontend always sends it.
+
+Movements are the ingredient's stock history: they cannot be edited or deleted
+through the API or the Django admin. Stock never goes below zero.
+
+| Action                                       | Owner | Manager | Staff |
+| -------------------------------------------- | ----- | ------- | ----- |
+| See ingredients, stock, and history          | yes   | yes     | yes   |
+| Record deliveries and counts                 | yes   | yes     | yes   |
+| Add, edit, archive, and delete ingredients   | yes   | yes     | no    |
+
+An ingredient's unit can change, and the ingredient can be deleted, only until
+it has stock history; after that, archive it instead. Archived ingredients are
+hidden from the main list and cannot change stock.
+
+**Retries are safe.** Every receive and count carries a `request_id` (a UUID
+the client chooses once per submission). Sending the same request again
+returns the movement already recorded (`200`) instead of changing stock twice;
+reusing a `request_id` for a different change returns `409`. The frontend
+keeps the same ID when you submit a form again after an error or a lost
+connection, and disables the button while a submission is in flight.
+
+Deliveries, counts, unit changes, and deletions of one ingredient lock its row,
+so simultaneous requests are applied one at a time.
+
+| Endpoint (under `/api/organizations/<id>/`)   | Methods            |
+| --------------------------------------------- | ------------------ |
+| `ingredients/` (`?search=`, `?archived=true`) | GET, POST          |
+| `ingredients/<ingredient id>/`                | GET, PATCH, DELETE |
+| `ingredients/<ingredient id>/receive/`        | POST               |
+| `ingredients/<ingredient id>/count/`          | POST               |
+| `ingredients/<ingredient id>/movements/`      | GET                |
 
 ### Not built yet
 
@@ -187,6 +238,9 @@ gets a 404; `apps/organizations/tests.py` shows the pattern.
   admin.
 - Member management and invitation screens in the frontend; staying signed in
   across reloads; frontend unit tests.
+- Inventory: expiry dates and batches, sales imports, waste logging, a stock
+  history screen (the API has it), unit conversions and purchase units (cases,
+  packs), costs, suppliers, and multiple locations per organization.
 - Multi-factor authentication, account lockout, deleting organizations, a
   Content Security Policy for the static site, and database row-level security.
 - Rate-limit counters are kept per server process, and clients are identified

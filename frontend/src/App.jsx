@@ -3,6 +3,7 @@ import { useAuth } from './auth/useAuth.js'
 import SystemStatus from './components/SystemStatus.jsx'
 import CreateOrganizationPage from './pages/CreateOrganizationPage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
+import InventoryPage from './pages/InventoryPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
 import './App.css'
@@ -55,6 +56,10 @@ function App() {
         <Route
           path="/organizations/new"
           element={<RequireAuth><CreateOrganizationPage /></RequireAuth>}
+        />
+        <Route
+          path="/organizations/:organizationId/inventory"
+          element={<RequireAuth><InventoryPage /></RequireAuth>}
         />
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />
