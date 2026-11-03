@@ -17,8 +17,8 @@ from django.utils import timezone
 
 from apps.inventory.models import Ingredient, MovementKind, StockMovement
 from apps.inventory.stock import record_stock_change
-from apps.inventory.units import convert, round_quantity
-from apps.menu.models import MenuItem, MenuItemAlias, RecipeLine
+from apps.menu.models import MenuItem, MenuItemAlias
+from apps.menu.recipes import ingredient_totals
 from apps.organizations.models import Organization
 
 from .csv_import import start_of_day
@@ -110,26 +110,15 @@ def requirements_for(sales_import):
         if menu_item_id not in item_earliest or moment < item_earliest[menu_item_id]:
             item_earliest[menu_item_id] = moment
 
-    result = Requirements(item_totals=dict(item_totals))
-    exact = defaultdict(Decimal)
-    recipes = RecipeLine.objects.filter(
-        menu_item__in=item_totals,
-        # Recipes are validated to use the organization's own ingredients; never trust otherwise.
-        ingredient__organization=sales_import.organization,
-    ).select_related("ingredient")
-    with_recipe = set()
-    for line in recipes:
-        with_recipe.add(line.menu_item_id)
-        exact[line.ingredient_id] += convert(
-            item_totals[line.menu_item_id] * line.quantity, line.unit, line.ingredient.unit
-        )
-        earliest = item_earliest[line.menu_item_id]
-        current = result.earliest_sale.get(line.ingredient_id)
-        if current is None or earliest < current:
-            result.earliest_sale[line.ingredient_id] = earliest
-    # Round once per ingredient, not once per row.
-    result.by_ingredient = {pk: round_quantity(total) for pk, total in exact.items() if round_quantity(total) > 0}
-    result.items_without_recipe = set(item_totals) - with_recipe
+    totals = ingredient_totals(sales_import.organization, item_totals)
+    result = Requirements(item_totals=dict(item_totals), by_ingredient=totals.by_ingredient)
+    for menu_item_id, ingredient_ids in totals.ingredients_by_item.items():
+        earliest = item_earliest[menu_item_id]
+        for ingredient_id in ingredient_ids:
+            current = result.earliest_sale.get(ingredient_id)
+            if current is None or earliest < current:
+                result.earliest_sale[ingredient_id] = earliest
+    result.items_without_recipe = set(item_totals) - set(totals.ingredients_by_item)
     return result
 
 

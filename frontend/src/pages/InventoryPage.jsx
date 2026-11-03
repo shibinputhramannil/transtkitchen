@@ -13,6 +13,7 @@ import {
   updateIngredient,
 } from '../api/client.js'
 import FormErrors from '../components/FormErrors.jsx'
+import WasteForm from '../components/WasteForm.jsx'
 import { formatQuantity } from '../format.js'
 import { localDate } from '../timeZones.js'
 
@@ -241,10 +242,16 @@ function ExpiryCorrectionForm({ organizationId, ingredientId, batch, onSaved, on
   )
 }
 
-function BatchList({ organizationId, ingredient, canManage, onChanged }) {
+// Throwing a whole batch out defaults to its full remaining quantity.
+function discardReason(batch) {
+  return batch.status === 'expired' ? 'expired' : 'spoiled'
+}
+
+function BatchList({ organizationId, timeZone, ingredient, canManage, onChanged }) {
   const [result, setResult] = useState(null)
   const [errors, setErrors] = useState([])
   const [correcting, setCorrecting] = useState(null)
+  const [discarding, setDiscarding] = useState(null)
   const [reloadCount, setReloadCount] = useState(0)
 
   useEffect(() => {
@@ -283,12 +290,35 @@ function BatchList({ organizationId, ingredient, canManage, onChanged }) {
             </span>
             <ExpiryBadge status={batch.status} expiresOn={batch.expires_on} />
           </div>
-          {canManage && correcting !== batch.id && (
+          {correcting !== batch.id && discarding !== batch.id && (
             <div className="actions">
-              <button type="button" onClick={() => setCorrecting(batch.id)}>
-                Correct expiry date
-              </button>
+              {ingredient.is_active && (
+                <button type="button" onClick={() => setDiscarding(batch.id)}>
+                  Discard
+                </button>
+              )}
+              {canManage && (
+                <button type="button" onClick={() => setCorrecting(batch.id)}>
+                  Correct expiry date
+                </button>
+              )}
             </div>
+          )}
+          {discarding === batch.id && (
+            <WasteForm
+              organizationId={organizationId}
+              timeZone={timeZone}
+              ingredient={ingredient}
+              batch={batch}
+              initialQuantity={batch.quantity_remaining}
+              initialReason={discardReason(batch)}
+              onSaved={() => {
+                setDiscarding(null)
+                setReloadCount((count) => count + 1)
+                onChanged()
+              }}
+              onCancel={() => setDiscarding(null)}
+            />
           )}
           {correcting === batch.id && (
             <ExpiryCorrectionForm
@@ -310,7 +340,7 @@ function BatchList({ organizationId, ingredient, canManage, onChanged }) {
 }
 
 function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChanged, onReload }) {
-  // null, 'receive', 'count', 'edit', or 'batches'.
+  // null, 'receive', 'count', 'waste', 'edit', or 'batches'.
   const [open, setOpen] = useState(null)
   const [archiveErrors, setArchiveErrors] = useState([])
   const [archiving, setArchiving] = useState(false)
@@ -370,6 +400,9 @@ function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChan
               <button type="button" onClick={() => setOpen('count')}>
                 Count
               </button>
+              <button type="button" onClick={() => setOpen('waste')}>
+                Waste
+              </button>
             </>
           )}
           <button
@@ -394,12 +427,25 @@ function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChan
       {open === 'batches' && (
         <BatchList
           organizationId={organizationId}
+          timeZone={timeZone}
           ingredient={ingredient}
           canManage={canManage}
           onChanged={onReload}
         />
       )}
       <FormErrors errors={archiveErrors} />
+      {open === 'waste' && (
+        <WasteForm
+          organizationId={organizationId}
+          timeZone={timeZone}
+          ingredient={ingredient}
+          onSaved={() => {
+            setOpen(null)
+            onReload()
+          }}
+          onCancel={() => setOpen(null)}
+        />
+      )}
       {(open === 'receive' || open === 'count') && (
         <StockForm
           organizationId={organizationId}
@@ -435,9 +481,10 @@ function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChan
   )
 }
 
-function ExpiringSoon({ organizationId, reloadKey }) {
+function ExpiringSoon({ organizationId, timeZone, reloadKey, onChanged }) {
   const [result, setResult] = useState(null)
   const [errors, setErrors] = useState([])
+  const [discarding, setDiscarding] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -463,12 +510,36 @@ function ExpiringSoon({ organizationId, reloadKey }) {
       {result && result.results.length > 0 && (
         <ul className="batch-list">
           {result.results.map((batch) => (
-            <li key={batch.id} className="ingredient-summary">
-              <span>
-                <strong>{batch.ingredient.name}</strong> · {formatQuantity(batch.quantity_remaining)}{' '}
-                {batch.ingredient.unit}
-              </span>
-              <ExpiryBadge status={batch.status} expiresOn={batch.expires_on} />
+            <li key={batch.id}>
+              <div className="ingredient-summary">
+                <span>
+                  <strong>{batch.ingredient.name}</strong> · {formatQuantity(batch.quantity_remaining)}{' '}
+                  {batch.ingredient.unit}
+                </span>
+                <span className="actions">
+                  <ExpiryBadge status={batch.status} expiresOn={batch.expires_on} />
+                  {batch.ingredient.is_active && discarding !== batch.id && (
+                    <button type="button" onClick={() => setDiscarding(batch.id)}>
+                      Discard
+                    </button>
+                  )}
+                </span>
+              </div>
+              {discarding === batch.id && (
+                <WasteForm
+                  organizationId={organizationId}
+                  timeZone={timeZone}
+                  ingredient={batch.ingredient}
+                  batch={batch}
+                  initialQuantity={batch.quantity_remaining}
+                  initialReason={discardReason(batch)}
+                  onSaved={() => {
+                    setDiscarding(null)
+                    onChanged()
+                  }}
+                  onCancel={() => setDiscarding(null)}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -561,7 +632,12 @@ export default function InventoryPage() {
         </Link>
       </div>
 
-      <ExpiringSoon organizationId={organizationId} reloadKey={reloadCount} />
+      <ExpiringSoon
+        organizationId={organizationId}
+        timeZone={organization.time_zone}
+        reloadKey={reloadCount}
+        onChanged={reload}
+      />
 
       {canManage &&
         (adding ? (

@@ -94,6 +94,8 @@ class MovementKind(models.TextChoices):
     COUNT = "count", "Stock count"
     EXPIRY_CORRECTION = "expiry_correction", "Expiry date corrected"
     SALE = "sale", "Used by sales"
+    WASTE = "waste", "Wasted"
+    WASTE_VOID = "waste_void", "Waste entry voided"
 
 
 class StockMovement(TimeStampedModel):

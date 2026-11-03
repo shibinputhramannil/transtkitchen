@@ -316,3 +316,27 @@ export function getSalesTemplate(organizationId) {
 export function getDailySales(organizationId) {
   return authRequest('GET', organizationPath(organizationId, 'sales/daily/'))
 }
+
+// Logs waste. The request ID is chosen once per form, so submitting again
+// after an error or a lost response never logs the waste twice.
+export function logWaste(organizationId, entry) {
+  return authRequest('POST', organizationPath(organizationId, 'waste/'), entry)
+}
+
+export function listWaste(organizationId, { includeVoided = false } = {}) {
+  const params = includeVoided ? '?include_voided=true' : ''
+  return authRequest('GET', organizationPath(organizationId, `waste/${params}`))
+}
+
+// Puts back the stock the entry took; voiding again changes nothing.
+export function voidWaste(organizationId, entryId, reason) {
+  return authRequest(
+    'POST',
+    organizationPath(organizationId, `waste/${encodeURIComponent(entryId)}/void/`),
+    { reason },
+  )
+}
+
+export function getWasteSummary(organizationId) {
+  return authRequest('GET', organizationPath(organizationId, 'waste/summary/'))
+}

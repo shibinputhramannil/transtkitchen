@@ -3,6 +3,15 @@ export function formatQuantity(quantity) {
   return quantity.includes('.') ? quantity.replace(/0+$/, '').replace(/\.$/, '') : quantity
 }
 
+export const WASTE_REASONS = {
+  expired: 'Expired',
+  spoiled: 'Spoiled',
+  damaged: 'Damaged (dropped or burnt)',
+  overproduction: 'Overproduction',
+  quality: 'Quality (returned or not to standard)',
+  other: 'Other',
+}
+
 // Units each stock unit can be measured in: grams and kilograms, millilitres
 // and litres, or counted items. The server enforces the same rule.
 const UNIT_GROUPS = [['g', 'kg'], ['ml', 'l'], ['each']]

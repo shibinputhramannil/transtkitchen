@@ -18,11 +18,14 @@ class InsufficientStock(Exception):
     pass
 
 
-def record_stock_change(ingredient, *, kind, change, request_id, user=None, note="", expires_on=None):
+def record_stock_change(
+    ingredient, *, kind, change, request_id, user=None, note="", expires_on=None, from_batch=None
+):
     """
     Applies `change` to the ingredient and records it as a movement with lines.
     An increase becomes a new batch (a delivery, or stock found by a count);
-    a decrease is taken from existing batches, earliest expiry first.
+    a decrease is taken from existing batches, earliest expiry first, or from
+    `from_batch` only.
     """
     quantity_after = ingredient.quantity_on_hand + change
     ingredient.quantity_on_hand = quantity_after
@@ -49,18 +52,21 @@ def record_stock_change(ingredient, *, kind, change, request_id, user=None, note
         )
         MovementLine.objects.create(movement=movement, batch=batch, quantity_change=change)
     elif change < 0:
-        take_from_batches(ingredient, movement, -change)
+        take_from_batches(ingredient, movement, -change, only_batch=from_batch)
     return movement
 
 
-def take_from_batches(ingredient, movement, quantity):
+def take_from_batches(ingredient, movement, quantity, only_batch=None):
     """
     Takes `quantity` from the ingredient's batches, earliest expiry first
     (batches without an expiry date last, oldest first), recording one line
-    per batch on `movement`.
+    per batch on `movement`. With `only_batch`, takes from that batch alone.
     """
+    batches = ingredient.batches.filter(quantity_remaining__gt=0)
+    if only_batch is not None:
+        batches = batches.filter(pk=only_batch.pk)
     lines = []
-    for batch in ingredient.batches.filter(quantity_remaining__gt=0):
+    for batch in batches:
         if quantity == 0:
             break
         taken = min(batch.quantity_remaining, quantity)
@@ -72,6 +78,36 @@ def take_from_batches(ingredient, movement, quantity):
         raise InsufficientStock(f"{ingredient} is short by {quantity} {ingredient.unit}.")
     MovementLine.objects.bulk_create(lines)
     return lines
+
+
+def return_taken_stock(ingredient, taken_lines, *, kind, request_id, user=None, note=""):
+    """
+    Undoes an earlier decrease: puts back exactly what each of `taken_lines`
+    (the earlier movement's negative lines) took, into the same batches, and
+    records it as one movement with matching positive lines. A batch never
+    ends up holding more than it received.
+    """
+    returned = sum((-line.quantity_change for line in taken_lines), Decimal("0"))
+    quantity_after = ingredient.quantity_on_hand + returned
+    ingredient.quantity_on_hand = quantity_after
+    ingredient.save(update_fields=["quantity_on_hand", "updated_at"])
+    movement = StockMovement.objects.create(
+        ingredient=ingredient,
+        kind=kind,
+        quantity_change=returned,
+        quantity_after=quantity_after,
+        note=note,
+        created_by=user,
+        request_id=request_id,
+    )
+    lines = []
+    for taken in taken_lines:
+        batch = StockBatch.objects.get(pk=taken.batch_id)
+        batch.quantity_remaining -= taken.quantity_change
+        batch.save(update_fields=["quantity_remaining", "updated_at"])
+        lines.append(MovementLine(movement=movement, batch=batch, quantity_change=-taken.quantity_change))
+    MovementLine.objects.bulk_create(lines)
+    return movement
 
 
 def expiry_status(expires_on, today):

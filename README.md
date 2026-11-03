@@ -4,10 +4,10 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 4c (sales imports).** People can register, sign in, create
+> **Status: Phase 4d (waste logging).** People can register, sign in, create
 > an organization, manage ingredients and stock with expiry dates, build menu
-> items with recipes, and import sales from CSV files, which deducts the
-> ingredients they used. Waste logging comes next.
+> items with recipes, import sales from CSV files, and log waste, all of which
+> keep stock up to date batch by batch. Forecasting and prep planning come next.
 
 ## Stack
 
@@ -20,7 +20,7 @@ tracking, and waste logging.
 | Hosting  | Render: static site + Docker web service + Postgres |
 
 ```
-backend/    Django project (config/) and apps (accounts, core, organizations, inventory, menu, sales)
+backend/    Django project (config/) and apps (accounts, core, organizations, inventory, menu, sales, waste)
 frontend/   Vite React app
 docker-compose.yml   local development stack
 render.yaml          Render Blueprint for production
@@ -84,8 +84,10 @@ backend/
   apps/inventory/       ingredients, stock batches and expiry, stock history;
                         stock.py holds the rules every stock change follows,
                         units.py the unit conversions
-  apps/menu/            menu items, recipes, and remembered sales item names
+  apps/menu/            menu items, recipes (recipes.py: portions to ingredient
+                        quantities), and remembered sales item names
   apps/sales/           sales imports: CSV parsing, preview, applying, reports
+  apps/waste/           waste entries, voiding, and waste reports
 ```
 
 - **Settings** live in one file, `config/settings.py`, and every
@@ -370,6 +372,52 @@ Imports are designed to accept point-of-sale integrations later: each import
 records its `source` and a `source_reference` (for CSV files, the file's hash)
 that may be used only once.
 
+## Waste
+
+Any member can log waste; managers and owners can void entries. A waste entry
+is one of:
+
+- **An ingredient**, in a unit compatible with its stock unit (300 g of flour
+  stocked in kg). Stock is taken earliest expiry first, or from one chosen
+  batch: the **Discard** button on a batch (and on expired stock in the
+  "Expiring soon" list) logs its whole remaining quantity, with the reason
+  "Expired" when it has expired.
+- **A menu item**, in portions. Its recipe says which ingredients went to
+  waste with it, exactly as for sales. Items without a recipe are recorded but
+  deduct nothing.
+
+Reasons are `expired`, `spoiled`, `damaged`, `overproduction`, `quality`, and
+`other`. The waste date is the kitchen-local business date: today by default,
+up to 7 days back, never in the future.
+
+Logging is one transaction: the entry, its stock changes, and its batch lines
+are saved together or not at all. Each submission carries a `request_id`, so
+sending it again returns the entry already logged instead of logging twice.
+Two situations must be acknowledged first, as with sales imports:
+
+- `shortfall`: recorded stock is less than the waste. Stock is taken down to
+  zero, never below, and the rest is recorded as a shortfall.
+- `counted_after`: an ingredient was counted after the waste may have happened,
+  so the count may already leave it out and deducting it again could count it
+  twice. Waste for today happened when it was logged; waste for an earlier day
+  is treated as happening at the start of that day in the kitchen's time zone.
+
+Entries are never edited. **Voiding** an entry (with a reason) puts back
+exactly the stock it took, into the same batches it came from, and leaves the
+entry out of reports. Voiding again changes nothing. Archived ingredients
+cannot change stock, so restore them before logging or voiding their waste.
+
+The **waste summary** covers a date range (default the last 7 days) and never
+adds quantities across units: per ingredient and unit, per reason (entry
+counts, quantities per unit, and portions), and per menu item (portions).
+
+| Endpoint (under `/api/organizations/<id>/`)   | Methods                       |
+| --------------------------------------------- | ----------------------------- |
+| `waste/` (`?from=`, `?to=`, `?reason=`, `?ingredient=`, `?include_voided=true`) | GET, POST |
+| `waste/<id>/`                                 | GET                           |
+| `waste/<id>/void/` (`{reason}`)               | POST (managers and owners)    |
+| `waste/summary/` (`?from=`, `?to=`, up to 92 days) | GET                      |
+
 ### Not built yet
 
 - Email verification, password reset, and email invitations (they need an email
@@ -378,9 +426,11 @@ that may be used only once.
   admin.
 - Member management and invitation screens in the frontend; staying signed in
   across reloads; frontend unit tests.
-- Inventory: waste logging, a stock history screen (the API has it), counting
-  batch by batch, expiry notifications, purchase units (cases, packs), costs,
-  suppliers, and multiple locations per organization.
+- Inventory: a stock history screen (the API has it), counting batch by batch,
+  expiry notifications, purchase units (cases, packs), costs, suppliers, and
+  multiple locations per organization.
+- Waste: money values (there are no ingredient costs yet), photos, targets and
+  alerts, editable reasons, and supplier returns.
 - Sales: point-of-sale integrations, choosing CSV columns, refunds, undoing an
   applied import, a business day that ends after midnight, prices and revenue,
   recipe sub-components and modifiers, and charts.

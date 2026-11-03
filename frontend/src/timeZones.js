@@ -18,6 +18,13 @@ export function localDate(timeZone) {
   return `${part('year')}-${part('month')}-${part('day')}`
 }
 
+// A YYYY-MM-DD date moved by a whole number of days.
+export function addDays(isoDate, days) {
+  const date = new Date(`${isoDate}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+
 // Time zones the browser knows, always including UTC and `current`.
 export function timeZoneOptions(current) {
   let names = []

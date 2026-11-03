@@ -190,6 +190,9 @@ export default function DashboardPage() {
         <Link className="button" to={`/organizations/${organization.id}/sales`}>
           Sales
         </Link>
+        <Link className="button" to={`/organizations/${organization.id}/waste`}>
+          Waste
+        </Link>
       </div>
       <MemberList organizationId={organization.id} />
       <p>
