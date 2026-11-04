@@ -4,10 +4,11 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 4d (waste logging).** People can register, sign in, create
-> an organization, manage ingredients and stock with expiry dates, build menu
-> items with recipes, import sales from CSV files, and log waste, all of which
-> keep stock up to date batch by batch. Forecasting and prep planning come next.
+> **Status: Phase 5 (forecasting and prep planning).** People can register,
+> sign in, create an organization, manage ingredients and stock with expiry
+> dates, build menu items with recipes, import sales from CSV files, log waste,
+> and plan prep from sales forecasts. A UI redesign is planned for after the
+> remaining development phases.
 
 ## Stack
 
@@ -20,7 +21,7 @@ tracking, and waste logging.
 | Hosting  | Render: static site + Docker web service + Postgres |
 
 ```
-backend/    Django project (config/) and apps (accounts, core, organizations, inventory, menu, sales, waste)
+backend/    Django project (config/) and apps (accounts, core, organizations, inventory, menu, sales, waste, planning)
 frontend/   Vite React app
 docker-compose.yml   local development stack
 render.yaml          Render Blueprint for production
@@ -88,6 +89,7 @@ backend/
                         quantities), and remembered sales item names
   apps/sales/           sales imports: CSV parsing, preview, applying, reports
   apps/waste/           waste entries, voiding, and waste reports
+  apps/planning/        sales forecasts (forecasting.py) and prep plans
 ```
 
 - **Settings** live in one file, `config/settings.py`, and every
@@ -418,6 +420,57 @@ counts, quantities per unit, and portions), and per menu item (portions).
 | `waste/<id>/void/` (`{reason}`)               | POST (managers and owners)    |
 | `waste/summary/` (`?from=`, `?to=`, up to 92 days) | GET                      |
 
+## Forecasts and prep plans
+
+**Forecasts** estimate the portions of each active menu item that will sell
+on a business date, from applied sales imports only:
+
+- A **trading day** is a date with any applied sales. On a trading day, an item
+  with no sales sold 0. A date with no imported sales at all is unknown, not
+  zero, so a missed import does not drag forecasts down. An item's history
+  starts on its first appearance (its first sale or the day it was created,
+  whichever is earlier).
+- The forecast is the average of the last 4 trading days on the same weekday
+  (within 8 weeks), if there are at least 3; otherwise the average of the last
+  14 trading days, if there are at least 7; otherwise there is not enough
+  history and the manager decides. Every forecast lists the days and
+  quantities it used.
+
+**Prep plans** say how many portions of each menu item to prepare for one
+business date, from today up to 14 days ahead; there is one plan per date.
+
+- A new plan takes the forecast plus a buffer (10% by default, editable per
+  plan), rounded up to whole portions. Managers and owners change planned
+  portions, notes, and the buffer; staff can view plans.
+- **Refresh forecast** recalculates forecasts and updates lines nobody has
+  edited; edited lines keep their planned portions. Viewing a plan never
+  changes it.
+- Every change sends the plan's `version`; if someone else changed the plan
+  first, the change is refused (409) instead of overwriting theirs.
+- **Ingredient needs** come from the planned portions through the recipes, in
+  each ingredient's stock unit. They are shown against **current stock (live)**,
+  with the time they were calculated: stock that will have expired before the
+  plan date is not counted as usable, the shortfall is what is still needed,
+  and batches close to expiry on the plan date are listed to use first. Menu
+  items without a recipe are flagged.
+- **Finalizing** locks the plan and saves a **snapshot** of its ingredient needs
+  and the stock figures of that moment, labelled with when it was taken. The
+  snapshot is history, not current stock; the live figures are always
+  calculated separately. Managers can reopen a plan until its date has passed,
+  which discards the snapshot.
+- Each line also shows the item's recent overproduction waste. Once a plan's
+  date has passed, it shows what actually sold (when that day's sales are
+  imported) and what was overproduced.
+
+Plans never change stock: deliveries, counts, sales, and waste do.
+
+| Endpoint (under `/api/organizations/<id>/`)   | Methods                       |
+| --------------------------------------------- | ----------------------------- |
+| `forecast/` (`?date=`, default tomorrow)      | GET                           |
+| `prep-plans/` (`?from=`, `?to=`)              | GET, POST (`{plan_date, buffer_percent?}`) |
+| `prep-plans/<id>/`                            | GET, PATCH (`{version, buffer_percent?, lines: [{menu_item, planned?, note?}]}`), DELETE (drafts) |
+| `prep-plans/<id>/refresh/`, `finalize/`, `reopen/` (`{version}`) | POST       |
+
 ### Not built yet
 
 - Email verification, password reset, and email invitations (they need an email
@@ -431,6 +484,10 @@ counts, quantities per unit, and portions), and per menu item (portions).
   multiple locations per organization.
 - Waste: money values (there are no ingredient costs yet), photos, targets and
   alerts, editable reasons, and supplier returns.
+- Planning: holiday and event adjustments, trend models, accuracy dashboards,
+  automatic waste-based adjustment, sub-recipes and shared components (a sauce
+  used by several dishes), prep by station or time, purchase orders, printing
+  and exports, and notifications.
 - Sales: point-of-sale integrations, choosing CSV columns, refunds, undoing an
   applied import, a business day that ends after midnight, prices and revenue,
   recipe sub-components and modifiers, and charts.

@@ -144,9 +144,13 @@ class IngredientDetailView(IngredientScopedMixin, generics.RetrieveUpdateDestroy
             raise ValidationError(
                 {"detail": "Recipes use this ingredient. Remove it from them, or archive it instead."}
             )
-        if instance.waste_entries.exists() or instance.waste_deductions.exists():
+        if (
+            instance.waste_entries.exists()
+            or instance.waste_deductions.exists()
+            or instance.prep_plan_snapshots.exists()
+        ):
             raise ValidationError(
-                {"detail": "Waste has been logged for this ingredient, so it cannot be deleted. Archive it instead."}
+                {"detail": "Waste or prep plans refer to this ingredient, so it cannot be deleted. Archive it instead."}
             )
         if instance.movements.exists():
             raise ValidationError(

@@ -8,6 +8,7 @@ import MenuPage from './pages/MenuPage.jsx'
 import SalesImportPage from './pages/SalesImportPage.jsx'
 import SalesPage from './pages/SalesPage.jsx'
 import WastePage from './pages/WastePage.jsx'
+import PrepPage from './pages/PrepPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
 import './App.css'
@@ -80,6 +81,10 @@ function App() {
         <Route
           path="/organizations/:organizationId/waste"
           element={<RequireAuth><WastePage /></RequireAuth>}
+        />
+        <Route
+          path="/organizations/:organizationId/prep"
+          element={<RequireAuth><PrepPage /></RequireAuth>}
         />
         <Route path="/" element={<RequireAuth><DashboardPage /></RequireAuth>} />
         <Route path="*" element={<Navigate to="/" replace />} />

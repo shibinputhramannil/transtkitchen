@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "apps.menu",
     "apps.sales",
     "apps.waste",
+    "apps.planning",
 ]
 
 MIDDLEWARE = [

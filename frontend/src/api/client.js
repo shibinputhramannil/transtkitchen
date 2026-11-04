@@ -340,3 +340,45 @@ export function voidWaste(organizationId, entryId, reason) {
 export function getWasteSummary(organizationId) {
   return authRequest('GET', organizationPath(organizationId, 'waste/summary/'))
 }
+
+function prepPlanPath(organizationId, planId, rest = '') {
+  return organizationPath(organizationId, `prep-plans/${encodeURIComponent(planId)}/${rest}`)
+}
+
+export function getForecast(organizationId, date) {
+  return authRequest('GET', organizationPath(organizationId, `forecast/?date=${encodeURIComponent(date)}`))
+}
+
+export function listPrepPlans(organizationId, { from, to } = {}) {
+  const params = new URLSearchParams()
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
+  return authRequest('GET', organizationPath(organizationId, `prep-plans/?${params}`))
+}
+
+export function createPrepPlan(organizationId, planDate) {
+  return authRequest('POST', organizationPath(organizationId, 'prep-plans/'), { plan_date: planDate })
+}
+
+export function getPrepPlan(organizationId, planId) {
+  return authRequest('GET', prepPlanPath(organizationId, planId))
+}
+
+// Saves changes made to the version last seen; a 409 means someone else
+// changed the plan in the meantime.
+export function updatePrepPlan(organizationId, planId, { version, bufferPercent, lines }) {
+  return authRequest('PATCH', prepPlanPath(organizationId, planId), {
+    version,
+    ...(bufferPercent !== undefined ? { buffer_percent: bufferPercent } : {}),
+    lines,
+  })
+}
+
+// action: 'refresh', 'finalize', or 'reopen'.
+export function prepPlanAction(organizationId, planId, action, version) {
+  return authRequest('POST', prepPlanPath(organizationId, planId, `${action}/`), { version })
+}
+
+export function deletePrepPlan(organizationId, planId) {
+  return authRequest('DELETE', prepPlanPath(organizationId, planId))
+}

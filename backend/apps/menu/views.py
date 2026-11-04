@@ -67,9 +67,9 @@ class MenuItemDetailView(MenuScopedMixin, generics.RetrieveUpdateDestroyAPIView)
         self.save_menu_item(serializer)
 
     def perform_destroy(self, instance):
-        if instance.sale_lines.exists() or instance.waste_entries.exists():
+        if instance.sale_lines.exists() or instance.waste_entries.exists() or instance.prep_plan_lines.exists():
             raise ValidationError(
-                {"detail": "Sales or waste refer to this menu item, so it cannot be deleted. Archive it instead."}
+                {"detail": "Sales, waste, or prep plans refer to this menu item, so it cannot be deleted. Archive it instead."}
             )
         instance.delete()
 

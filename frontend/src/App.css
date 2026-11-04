@@ -178,6 +178,34 @@ select {
   font-size: 1rem;
 }
 
+/* Saved snapshot vs live figures: kept visually distinct so history is never read as current stock. */
+.figures {
+  margin-top: 1.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+}
+
+.figures h3 {
+  margin-top: 0;
+}
+
+.figures.live {
+  border: 2px solid var(--ok-text);
+}
+
+.figures.snapshot {
+  border: 2px dashed var(--border);
+  background: var(--bg);
+}
+
+.link-button {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  text-decoration: underline;
+}
+
 .voided {
   text-decoration: line-through;
   opacity: 0.7;
