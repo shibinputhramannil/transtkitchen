@@ -522,8 +522,10 @@ Plans never change stock: deliveries, counts, sales, and waste do.
 - Multi-factor authentication, account lockout, deleting organizations, and
   database row-level security. The static site's Content Security Policy ships
   in report-only mode until it is checked on the deployed site.
-- Rate-limit counters are kept per server process, and clients are identified
-  by IP only once `DRF_NUM_PROXIES` is set for the hosting setup.
+- Rate-limit counters are kept per server process. On Render,
+  `DRF_NUM_PROXIES=0` makes everyone behind Render's proxy share each limit
+  until the real proxy count is established (see
+  [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy)).
 - Expired tokens are deleted at every API start; a long-running server
   without restarts would need `python manage.py flushexpiredtokens` run
   periodically.
@@ -596,7 +598,7 @@ the service would override it, so leave that unset.
 |                   | `CORS_ALLOWED_ORIGINS`         | Entered when applying: the frontend URL, e.g. `https://kitchenmind-web.onrender.com` (no trailing slash). |
 |                   | `CSRF_TRUSTED_ORIGINS`         | Entered when applying: the same frontend URL. |
 |                   | `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD` | Temporary, for the first admin only. See [First admin account](#first-admin-account). |
-|                   | `DRF_NUM_PROXIES`              | Unset at first. See [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy). |
+|                   | `DRF_NUM_PROXIES`              | `0` on Render for now (everyone shares each limit); never leave it unset. See [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy). |
 |                   | `DJANGO_SECURE_HSTS_SECONDS`   | Optional, default `3600`. Raise it last. See [HTTPS and HSTS](#https-and-hsts). |
 | `kitchenmind-web` | `VITE_API_URL`                 | Entered when applying: the API URL, e.g. `https://kitchenmind-api.onrender.com`. Built into the bundle, so redeploy the static site after changing it. |
 
@@ -686,17 +688,24 @@ not yet against the deployed site. To enforce it:
    import, Waste, Prep, Team, Account) with the browser console open. Look for
    `Content-Security-Policy` report messages.
 3. If there are none, rename the header in `render.yaml` to
-   `Content-Security-Policy` and redeploy. Check the console again.
+   `Content-Security-Policy` and apply it (below). Check the console again.
 
-Header changes in `render.yaml` apply when the Blueprint syncs. If you edit
-headers in the dashboard instead, mirror the change in `render.yaml`.
+Header changes in `render.yaml` apply only when the Blueprint is synced, and
+Auto Sync is off, so use **Manual sync**, or enter the same change on the
+static site's **Headers** page; keep the two identical. A sync keeps header
+rules that are not in `render.yaml`, so removing a header also means deleting
+it on the Headers page. Header changes need no redeploy: when the reporting
+headers were added on the Headers page, the live site served them within about
+a minute, and the CDN can keep serving a cached copy of a page for up to
+5 minutes (`s-maxage=300`).
 
 **Violation reports.** The API accepts browsers' CSP violation reports at
 `POST /api/csp-reports/`, in both the `report-uri` and the Reporting API
 (`report-to`) formats: no sign-in, at most 16 KB, and 60 requests a minute per
 client. It replies `204`, or `413` for a body that is too large and `429` when
-the rate limit is reached. It stores nothing. Each distinct violation is written to the API log at most once
-an hour per server process, as one line: the disposition, the directive, the
+the rate limit is reached. It stores nothing. Each distinct violation is
+written to the API log at most once an hour per server process, as one line:
+the disposition, the directive, the
 blocked resource reduced to a keyword such as `inline` or to its origin, the
 page path with IDs replaced by `:id` and without its query string, the source
 file on the frontend's own origin with line and column, the HTTP status, and
@@ -711,14 +720,25 @@ static site's report-only policy sends reports here: `report-uri` and
 
 ### Rate limiting behind Render's proxy
 
-Registration and sign-in are limited to 10 requests a minute per client. Render
-puts a proxy in front of the API, so the API sees the proxy's address unless
-`DRF_NUM_PROXIES` tells it how many proxies append to `X-Forwarded-For`.
-Render does not document that number. With the variable unset, every client
-shares one limit; a value that is too large lets anyone choose their own
-address by sending a fake `X-Forwarded-For` header, and so bypass the limit.
+Registration, sign-in, and password changes are limited to 10 requests a
+minute per client, and CSP violation reports to 60. Render puts a proxy in
+front of the API, so the API's connection always comes from the proxy.
+`DRF_NUM_PROXIES` says how many proxies append to `X-Forwarded-For`, and so how
+clients are told apart:
 
-Find the value without logging any client addresses:
+- **Unset:** the whole `X-Forwarded-For` header identifies the client, so
+  anyone can send a different made-up value with each request and never reach
+  the limit. Never leave it unset on Render.
+- **`0`** (the current setting on Render): the header is ignored and the limit
+  applies to the proxy's address, so everyone behind the same proxy address
+  shares one limit. It cannot be bypassed, but when many people sign in at once,
+  or someone abuses it, legitimate requests can get `429` for up to a minute.
+- **Too large:** anyone can choose their own address with a made-up header and
+  bypass the limit, as when unset.
+- **The real proxy count:** each client gets its own limit, and made-up headers
+  do not help. Render does not document this number.
+
+Find the real count without logging any client addresses:
 
 1. Set `DRF_NUM_PROXIES=1` and let the API redeploy.
 2. From one network (for example home Wi-Fi), sign in with a wrong password
@@ -732,10 +752,10 @@ Find the value without logging any client addresses:
    and confirm you still get `429`. If the fake header lets you through, the
    value is too large.
 
-If no value passes both checks, leave the variable unset and note that sign-in
-limits are shared. The counters are kept per server process, so with more than
-one gunicorn worker (`WEB_CONCURRENCY`) the effective limit is that many times
-higher.
+If no value passes both checks, keep `0`. The counters are kept per server
+process, so with more than one gunicorn worker (`WEB_CONCURRENCY`) the
+effective limit is that many times higher; the free instance was seen starting
+one worker.
 
 ### HTTPS and HSTS
 
@@ -772,7 +792,8 @@ These cannot be verified locally and should be ticked off on the first deploy:
       security headers.
 - [ ] Only the expected service redeploys when `backend/` or `frontend/` changes.
 - [ ] No CSP reports on any screen, then the CSP is enforced.
-- [ ] `DRF_NUM_PROXIES` is set by the procedure above, or left unset on purpose.
+- [ ] `DRF_NUM_PROXIES` is the real proxy count from the procedure above (it is
+      `0` until then; never unset).
 - [ ] `WEB_CONCURRENCY` and memory use on the free instance.
 - [ ] The first admin exists and both bootstrap variables are removed.
 - [ ] External database access is narrowed.
