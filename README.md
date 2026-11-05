@@ -4,10 +4,12 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 6 (team and account management).** People can register,
+> **Status: Phase 7 (production readiness).** People can register,
 > sign in, create an organization, invite and manage their team, manage
 > ingredients and stock with expiry dates, build menu items with recipes,
 > import sales from CSV files, log waste, and plan prep from sales forecasts.
+> The app is prepared for its first Render deploy (see
+> [Deploy to Render](#deploy-to-render)) but not yet deployed.
 > A UI redesign is planned for after the remaining development phases.
 
 ## Stack
@@ -508,12 +510,14 @@ Plans never change stock: deliveries, counts, sales, and waste do.
 - Sales: point-of-sale integrations, choosing CSV columns, refunds, undoing an
   applied import, a business day that ends after midnight, prices and revenue,
   recipe sub-components and modifiers, and charts.
-- Multi-factor authentication, account lockout, deleting organizations, a
-  Content Security Policy for the static site, and database row-level security.
+- Multi-factor authentication, account lockout, deleting organizations, and
+  database row-level security. The static site's Content Security Policy ships
+  in report-only mode until it is checked on the deployed site.
 - Rate-limit counters are kept per server process, and clients are identified
   by IP only once `DRF_NUM_PROXIES` is set for the hosting setup.
-- Revoked and expired tokens accumulate; clear them periodically with
-  `python manage.py flushexpiredtokens`.
+- Expired tokens are deleted at every API start; a long-running server
+  without restarts would need `python manage.py flushexpiredtokens` run
+  periodically.
 
 ## Configuration
 
@@ -532,22 +536,218 @@ Security defaults:
 
 ## Deploy to Render
 
-1. Push this repository to GitHub or GitLab.
-2. In Render, choose **New → Blueprint** and select the repository. Render reads
-   `render.yaml` and creates `kitchenmind-db`, `kitchenmind-api`, and `kitchenmind-web`.
-3. When prompted, enter:
-   - `kitchenmind-api` → `CORS_ALLOWED_ORIGINS` and `CSRF_TRUSTED_ORIGINS`: the
-     frontend URL, e.g. `https://kitchenmind-web.onrender.com`
-   - `kitchenmind-web` → `VITE_API_URL`: the API URL, e.g.
-     `https://kitchenmind-api.onrender.com`
+[render.yaml](render.yaml) is a Render Blueprint that creates three resources:
 
-   Render may add a suffix to service names that are already taken; use the
-   URLs shown in the dashboard. If you change `VITE_API_URL` later, redeploy
-   the static site, because the value is built into the bundle.
-4. Open the frontend URL and confirm both statuses show `ok`, then create an
-   account.
+| Resource          | Type                | Plan | Region    |
+| ----------------- | ------------------- | ---- | --------- |
+| `kitchenmind-db`  | PostgreSQL 17       | free | Singapore |
+| `kitchenmind-api` | Docker web service  | free | Singapore |
+| `kitchenmind-web` | Static site         | free | global CDN (static sites take no region) |
 
-Free plan limits: the free Postgres database expires 30 days after creation
-(deleted after a further 14-day grace period), and the free API service sleeps
-after 15 minutes without traffic (the first request then takes about a minute).
-Upgrade both before storing real data.
+The API and database share a region so the API can use the database's private
+connection string. **Render does not allow changing a region or the Postgres
+major version after creation**, so confirm both before applying the Blueprint.
+
+### Before you start
+
+- The repository must be on GitHub, GitLab, or Bitbucket, and connected to your
+  Render account.
+- Decide on the region. Singapore is closest to kitchens on India time; Render
+  lists it as available, but its documentation does not say whether every free
+  plan is offered there. If Render rejects the Blueprint over the region or
+  plan, pick another region in `render.yaml` (for both the API and the
+  database) rather than letting them differ.
+- Decide whether you want automatic deploys. By default Render redeploys a
+  service whenever its files change on the linked branch; you can switch this
+  off in each service's settings.
+- Know the free-plan limits:
+  - The free database **expires 30 days after creation** and is deleted after a
+    further 14-day grace period. It has no backups. **Upgrade it to a paid plan
+    before storing real data.**
+  - The free API **sleeps after 15 minutes without traffic**. The next request
+    waits for it to start again (often around a minute). Each start also runs
+    migrations, token cleanup, and the admin bootstrap (see below).
+  - Free web services share 750 instance hours per workspace per month.
+  - The free plan has no shell, one-off jobs, or pre-deploy command, which is
+    why the API's startup script does that work.
+
+### Node version
+
+The static site's build uses the Node.js major version in
+[.node-version](.node-version) (`24`). A `NODE_VERSION` environment variable on
+the service would override it, so leave that unset.
+
+### Environment variables
+
+| Service           | Variable                       | Value |
+| ----------------- | ------------------------------ | ----- |
+| `kitchenmind-api` | `DATABASE_URL`                 | Set by the Blueprint (the database's private URL). |
+|                   | `DJANGO_SECRET_KEY`            | Generated by the Blueprint. Changing it signs everyone out. |
+|                   | `DJANGO_DEBUG`                 | `false` (set by the Blueprint). Never enable it. |
+|                   | `CORS_ALLOWED_ORIGINS`         | Entered when applying: the frontend URL, e.g. `https://kitchenmind-web.onrender.com` (no trailing slash). |
+|                   | `CSRF_TRUSTED_ORIGINS`         | Entered when applying: the same frontend URL. |
+|                   | `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD` | Temporary, for the first admin only. See [First admin account](#first-admin-account). |
+|                   | `DRF_NUM_PROXIES`              | Unset at first. See [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy). |
+|                   | `DJANGO_SECURE_HSTS_SECONDS`   | Optional, default `3600`. Raise it last. See [HTTPS and HSTS](#https-and-hsts). |
+| `kitchenmind-web` | `VITE_API_URL`                 | Entered when applying: the API URL, e.g. `https://kitchenmind-api.onrender.com`. Built into the bundle, so redeploy the static site after changing it. |
+
+Render adds the API's own `onrender.com` hostname to the allowed hosts
+automatically. The other options are described in
+[backend/.env.example](backend/.env.example).
+
+### Stage 1: create the services
+
+1. In Render, choose **New → Blueprint** and select the repository and branch.
+2. Review the plan Render shows: three resources, the regions above, and
+   Postgres 17. Stop if anything differs.
+3. Enter the three values marked as entered when applying (above), then apply.
+
+Render may add a suffix to a name that is already taken, which changes that
+service's URL. If it does, update `CORS_ALLOWED_ORIGINS`,
+`CSRF_TRUSTED_ORIGINS`, and `VITE_API_URL` to the URLs shown in the dashboard,
+and change the API origin in the CSP's `connect-src` in `render.yaml` (see
+[Security headers](#security-headers)).
+
+**Verify:**
+
+- The API's deploy succeeds and its log shows the migrations, then gunicorn
+  listening. If the deploy fails its health check while the API URL works in a
+  browser, look for `400` responses to `/api/health/` in the API log: that
+  would mean Render's health check sends a host name that is not in the allowed
+  hosts. This has not been checked against a real deploy.
+- `https://<api>/api/health/` returns `{"status": "ok", "database": "ok"}`.
+- The frontend loads, shows both statuses as `ok`, and a deep link such as
+  `https://<web>/inventory` loads the app rather than a 404 (the Blueprint
+  rewrites every path to `index.html`).
+- You can create an account and an organization, and the browser console shows
+  no CORS errors.
+
+**Roll back:** Render can redeploy any previous successful deploy of a service
+from its **Events** page. A rollback does not undo database migrations, so a
+migration that needs reversing needs its own fix.
+
+### First admin account
+
+The free plan has no shell, so `createsuperuser` cannot be run there. Instead,
+the API's startup script runs `bootstrap_admin`, which creates a Django admin
+account from two temporary variables:
+
+1. On `kitchenmind-api`, add `DJANGO_SUPERUSER_EMAIL` and
+   `DJANGO_SUPERUSER_PASSWORD` (a long, unique password; it must meet the same
+   rules as registration). Saving them redeploys the API.
+2. The API log shows `Admin bootstrap: created the admin account <email>`.
+   The password is never logged.
+3. Sign in at `https://<api>/admin/`.
+4. **Remove both variables** (this redeploys the API again), then change the
+   password from the admin's user page if you want one that never sat in the
+   dashboard.
+
+The command is safe to repeat: without the variables it does nothing, and if
+an account with that email already exists it changes nothing about it (not
+even the password) and only logs a reminder to remove the variables. Setting
+only one of the two, an invalid email address, or a password that fails the
+rules stops the API from starting, with the reason in the log.
+
+The Django admin sign-in has no rate limit of its own, so keep admin
+passwords strong and remove admin rights (`is_staff`) from accounts that no
+longer need them.
+
+### Token cleanup
+
+Every API start runs `flushexpiredtokens`, which deletes sign-in tokens that
+have expired. Because the free API restarts after every sleep, this keeps the
+token tables small without a scheduled job. (Render cron jobs are not free.)
+
+### Security headers
+
+The static site sends `X-Frame-Options: DENY`, `X-Content-Type-Options:
+nosniff`, `Referrer-Policy: same-origin`, a `Permissions-Policy` that turns
+off camera, microphone, location, and payments, and a Content Security Policy.
+
+The CSP starts in **report-only** mode (`Content-Security-Policy-Report-Only`):
+the browser reports violations in the console but blocks nothing. It allows
+only the site's own scripts, styles, fonts, and images (plus `data:` images),
+and network requests to the site itself and the API. It was tested enforced
+against a local production build on every screen with no violations, but
+not yet against the deployed site. To enforce it:
+
+1. Confirm the API origin in `connect-src` matches the real API URL exactly.
+2. Open the deployed site and go through every screen (dashboard, Inventory
+   including stock history, Menu, Sales including the template download and an
+   import, Waste, Prep, Team, Account) with the browser console open. Look for
+   `Content-Security-Policy` report messages.
+3. If there are none, rename the header in `render.yaml` to
+   `Content-Security-Policy` and redeploy. Check the console again.
+
+Header changes in `render.yaml` apply when the Blueprint syncs. If you edit
+headers in the dashboard instead, mirror the change in `render.yaml`.
+
+### Rate limiting behind Render's proxy
+
+Registration and sign-in are limited to 10 requests a minute per client. Render
+puts a proxy in front of the API, so the API sees the proxy's address unless
+`DRF_NUM_PROXIES` tells it how many proxies append to `X-Forwarded-For`.
+Render does not document that number. With the variable unset, every client
+shares one limit; a value that is too large lets anyone choose their own
+address by sending a fake `X-Forwarded-For` header, and so bypass the limit.
+
+Find the value without logging any client addresses:
+
+1. Set `DRF_NUM_PROXIES=1` and let the API redeploy.
+2. From one network (for example home Wi-Fi), sign in with a wrong password
+   until you get `429 Too Many Requests`.
+3. Within the same minute, from a different network (for example a phone on
+   mobile data), try once. A `429` here means clients are still sharing a
+   limit: try `2` and repeat. A normal error (`401`) means clients are told
+   apart.
+4. From the first network, wait for the limit to clear, exceed it again while
+   sending a made-up `X-Forwarded-For: 203.0.113.7` header with each request,
+   and confirm you still get `429`. If the fake header lets you through, the
+   value is too large.
+
+If no value passes both checks, leave the variable unset and note that sign-in
+limits are shared. The counters are kept per server process, so with more than
+one gunicorn worker (`WEB_CONCURRENCY`) the effective limit is that many times
+higher.
+
+### HTTPS and HSTS
+
+With `DJANGO_DEBUG=false`, the API redirects HTTP to HTTPS (except the health
+check), marks cookies secure, and sends HSTS for one hour
+(`DJANGO_SECURE_HSTS_SECONDS=3600`). Once everything above works, raise it, for
+example to `31536000` (a year). Do this last: browsers remember HSTS, and it
+cannot be withdrawn early. Subdomains and preloading stay off, because
+`onrender.com` is shared.
+
+### Protecting the data
+
+- **Upgrade the database to a paid plan before storing real data.** Free
+  databases expire and have no backups. Paid plans include point-in-time
+  recovery (3 days on Hobby, 7 days on Pro at the time of writing).
+- The Blueprint does not restrict external database access, so Render's
+  default applies. In the database's **Networking** settings, check which
+  addresses can connect from outside Render and narrow the list to your own
+  address, or to none.
+- To take a manual backup, run `pg_dump` with the database's **external**
+  connection string from your own machine, and keep the file somewhere safe and
+  private. Never commit it.
+- Never reset, delete, or recreate the Render database without a fresh backup.
+
+### Checks that need the real deploy
+
+These cannot be verified locally and should be ticked off on the first deploy:
+
+- [ ] Singapore and the free plans are accepted, with Postgres 17.
+- [ ] Final service URLs, and therefore `CORS_ALLOWED_ORIGINS`,
+      `CSRF_TRUSTED_ORIGINS`, `VITE_API_URL`, and the CSP's `connect-src`.
+- [ ] The health check passes (the host name it sends is allowed).
+- [ ] Deep links load through the rewrite, and the static site sends the
+      security headers.
+- [ ] Only the expected service redeploys when `backend/` or `frontend/` changes.
+- [ ] No CSP reports on any screen, then the CSP is enforced.
+- [ ] `DRF_NUM_PROXIES` is set by the procedure above, or left unset on purpose.
+- [ ] `WEB_CONCURRENCY` and memory use on the free instance.
+- [ ] The first admin exists and both bootstrap variables are removed.
+- [ ] External database access is narrowed.
+- [ ] The database is upgraded before real data, or its expiry date is noted.
+- [ ] HSTS is raised once everything else works.

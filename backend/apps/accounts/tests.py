@@ -1,12 +1,18 @@
+import os
 from datetime import timedelta
+from io import StringIO
+from unittest import mock
 
 import jwt
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import FieldDoesNotExist
+from django.core.management import CommandError, call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
 from apps.core.testing import APITestCase
@@ -387,6 +393,73 @@ class PasswordChangeTests(APITestCase):
         self.assertEqual(self.change().status_code, 429)
         self.user.refresh_from_db()
         self.assertTrue(self.user.check_password(PASSWORD))
+
+
+class BootstrapAdminTests(TestCase):
+    SECRET = "Startup-Admin-Pass-91"
+
+    def run_command(self, **env):
+        out = StringIO()
+        with mock.patch.dict(os.environ, env, clear=False):
+            for name in ("DJANGO_SUPERUSER_EMAIL", "DJANGO_SUPERUSER_PASSWORD"):
+                if name not in env:
+                    os.environ.pop(name, None)
+            call_command("bootstrap_admin", stdout=out)
+        return out.getvalue()
+
+    def test_does_nothing_without_the_variables(self):
+        self.assertEqual(self.run_command(), "")
+        self.assertFalse(User.objects.exists())
+
+    def test_creates_a_superuser_without_printing_the_password(self):
+        output = self.run_command(DJANGO_SUPERUSER_EMAIL="Admin@Example.com", DJANGO_SUPERUSER_PASSWORD=self.SECRET)
+
+        admin_user = User.objects.get()
+        self.assertTrue(admin_user.is_superuser and admin_user.is_staff)
+        self.assertTrue(admin_user.check_password(self.SECRET))
+        self.assertIn("created the admin account", output)
+        self.assertNotIn(self.SECRET, output)
+
+    def test_rerunning_or_an_existing_user_changes_nothing(self):
+        existing = User.objects.create_user(email="admin@example.com", password=PASSWORD)
+
+        output = self.run_command(DJANGO_SUPERUSER_EMAIL="ADMIN@example.com", DJANGO_SUPERUSER_PASSWORD=self.SECRET)
+        again = self.run_command(DJANGO_SUPERUSER_EMAIL="ADMIN@example.com", DJANGO_SUPERUSER_PASSWORD=self.SECRET)
+
+        existing.refresh_from_db()
+        # Never promoted, and the password is not overwritten.
+        self.assertFalse(existing.is_superuser or existing.is_staff)
+        self.assertTrue(existing.check_password(PASSWORD))
+        self.assertEqual(User.objects.count(), 1)
+        self.assertIn("left unchanged", output)
+        self.assertIn("left unchanged", again)
+        self.assertNotIn(self.SECRET, output + again)
+
+    def test_refuses_half_configured_or_weak_settings(self):
+        with self.assertRaisesMessage(CommandError, "Set both"):
+            self.run_command(DJANGO_SUPERUSER_EMAIL="admin@example.com")
+        with self.assertRaisesMessage(CommandError, "Set both"):
+            self.run_command(DJANGO_SUPERUSER_PASSWORD=self.SECRET)
+        with self.assertRaises(CommandError) as weak:
+            self.run_command(DJANGO_SUPERUSER_EMAIL="admin@example.com", DJANGO_SUPERUSER_PASSWORD="password")
+        self.assertIn("password rules", str(weak.exception))
+        self.assertNotIn("'password'", str(weak.exception))
+        for bad_email in ("admin", '"admin@example.com"', "admin@example.com,ops@example.com"):
+            with self.assertRaisesMessage(CommandError, "not a valid email address"):
+                self.run_command(DJANGO_SUPERUSER_EMAIL=bad_email, DJANGO_SUPERUSER_PASSWORD=self.SECRET)
+        self.assertFalse(User.objects.exists())
+
+
+class TokenCleanupTests(TestCase):
+    def test_startup_cleanup_removes_only_expired_tokens(self):
+        user = User.objects.create_user(email="chef@example.com", password=PASSWORD)
+        current = RefreshToken.for_user(user)
+        expired = RefreshToken.for_user(user)
+        OutstandingToken.objects.filter(jti=expired["jti"]).update(expires_at=timezone.now() - timedelta(days=1))
+
+        call_command("flushexpiredtokens", stdout=StringIO())
+
+        self.assertEqual(list(OutstandingToken.objects.values_list("jti", flat=True)), [current["jti"]])
 
 
 class MeTests(APITestCase):

@@ -1,12 +1,21 @@
 # Render Blueprint: https://render.com/docs/blueprint-spec
 # Values marked `sync: false` are entered in the Render dashboard when the
 # Blueprint is first applied. Paths are relative to the repo root.
+# See "Deploy to Render" in README.md for the full runbook.
+#
+# Region: the API and database are in Singapore (closest to kitchens on India
+# time) and must stay together for the private connection string. Render does
+# not let a region change after creation. Static sites take no region: they
+# are served from Render's global CDN.
+#
+# Node: the static site's build uses the version in /.node-version.
 
 databases:
   - name: kitchenmind-db
     databaseName: kitchenmind
     user: kitchenmind
     plan: free
+    region: singapore
     postgresMajorVersion: "17"
 
 services:
@@ -14,6 +23,7 @@ services:
     name: kitchenmind-api
     runtime: docker
     plan: free
+    region: singapore
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /api/health/
@@ -43,10 +53,32 @@ services:
     buildFilter:
       paths:
         - frontend/**
+        - .node-version
     routes:
       - type: rewrite
         source: /*
         destination: /index.html
+    headers:
+      # Report-only first: violations appear in the browser console without
+      # blocking anything. Once the deployed app shows none, rename this header
+      # to Content-Security-Policy to enforce it (see README). connect-src must
+      # name the API's real origin; update it if Render gave the API a
+      # different hostname.
+      - path: /*
+        name: Content-Security-Policy-Report-Only
+        value: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://kitchenmind-api.onrender.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: same-origin
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=(), payment=()
     envVars:
       # The API's URL, e.g. https://kitchenmind-api.onrender.com
       - key: VITE_API_URL
