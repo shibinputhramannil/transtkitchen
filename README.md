@@ -705,8 +705,8 @@ full user agents, referrers, code samples, the policy text, or query strings,
 and reports for other sites or caused by browser extensions are ignored. Like
 every API request, each report also appears in gunicorn's access log, which
 records the connecting address and the full user agent. The
-static site's policy does not send reports here yet: that needs
-`report-uri` and `report-to` in its policy and a `Reporting-Endpoints` header in
+static site's report-only policy sends reports here: `report-uri` and
+`report-to csp-endpoint` in the policy, with a `Reporting-Endpoints` header, in
 `render.yaml`.
 
 ### Rate limiting behind Render's proxy
