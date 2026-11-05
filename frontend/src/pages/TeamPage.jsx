@@ -84,7 +84,7 @@ function MemberRow({ organizationId, membership, myRole, isSelf, onChanged, onLe
               <span className="muted">
                 {isSelf ? 'Leave this organization?' : `Remove ${membership.user.email}?`}
               </span>
-              <button type="button" disabled={busy} onClick={remove}>
+              <button type="button" className="button-danger" disabled={busy} onClick={remove}>
                 {isSelf ? 'Yes, leave' : 'Yes, remove'}
               </button>
               <button type="button" disabled={busy} onClick={() => setConfirming(false)}>
@@ -131,7 +131,7 @@ function InviteForm({ organizationId, myRole, onInvited }) {
   return (
     <form className="form inline-form" onSubmit={handleSubmit}>
       <p className="muted">
-        KitchenMind does not send emails yet. After inviting someone, tell them to sign up or sign in
+        Transt KitchenMind AI does not send emails yet. After inviting someone, tell them to sign up or sign in
         with exactly this email address; the invitation then appears on their dashboard. Invitations
         expire after 7 days.
       </p>

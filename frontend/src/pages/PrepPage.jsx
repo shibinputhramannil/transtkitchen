@@ -272,16 +272,21 @@ function PlanView({ organizationId, plan, today, canManage, onPlan, onDeleted })
         <div className="actions">
           {plan.status === 'draft' && (
             <>
-              <button type="button" disabled={busy || !dirty} onClick={save}>
+              <button type="button" className="button-primary" disabled={busy || !dirty} onClick={save}>
                 Save changes
               </button>
               <button type="button" disabled={busy || dirty} onClick={() => act('refresh')}>
                 Refresh forecast
               </button>
-              <button type="button" disabled={busy || dirty} onClick={() => act('finalize')}>
+              <button
+                type="button"
+                className="button-primary"
+                disabled={busy || dirty}
+                onClick={() => act('finalize')}
+              >
                 Finalize
               </button>
-              <button type="button" disabled={busy} onClick={remove}>
+              <button type="button" className="button-danger" disabled={busy} onClick={remove}>
                 Delete draft
               </button>
             </>
@@ -430,7 +435,7 @@ export default function PrepPage() {
             </ul>
           )}
           {canManage ? (
-            <button type="button" disabled={creating} onClick={handleCreate}>
+            <button type="button" className="button-primary" disabled={creating} onClick={handleCreate}>
               {creating ? 'Creating…' : 'Create plan'}
             </button>
           ) : (

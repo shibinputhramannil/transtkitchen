@@ -356,10 +356,15 @@ export default function SalesImportPage() {
       <FormErrors errors={errors} />
       {isDraft && canManage && (
         <div className="actions">
-          <button type="button" disabled={!preview.can_apply || !allAcknowledged || applying} onClick={handleApply}>
+          <button
+            type="button"
+            className="button-primary"
+            disabled={!preview.can_apply || !allAcknowledged || applying}
+            onClick={handleApply}
+          >
             {applying ? 'Applying…' : 'Apply import'}
           </button>
-          <button type="button" disabled={applying} onClick={handleDiscard}>
+          <button type="button" className="button-danger" disabled={applying} onClick={handleDiscard}>
             Discard
           </button>
         </div>

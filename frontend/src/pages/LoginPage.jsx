@@ -58,7 +58,7 @@ export default function LoginPage() {
         out.
       </p>
       <p>
-        New to KitchenMind? <Link to="/register">Create an account</Link>
+        New to Transt KitchenMind AI? <Link to="/register">Create an account</Link>
       </p>
     </section>
   )

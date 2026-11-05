@@ -122,7 +122,12 @@ function InvitationInbox({ onAccepted }) {
                 </span>
               </span>
               <span className="actions">
-                <button type="button" disabled={busy !== null} onClick={() => respond(invitation, true)}>
+                <button
+                  type="button"
+                  className="button-primary"
+                  disabled={busy !== null}
+                  onClick={() => respond(invitation, true)}
+                >
                   Accept
                 </button>
                 <button type="button" disabled={busy !== null} onClick={() => respond(invitation, false)}>
@@ -263,13 +268,13 @@ export default function DashboardPage() {
   if (!organizations.length) {
     return (
       <section className="card">
-        <h2>Welcome to KitchenMind</h2>
+        <h2>Welcome to Transt KitchenMind AI</h2>
         <InvitationInbox onAccepted={handleAccepted} />
         <p>
           Create an organization for your restaurant, bakery, or cloud kitchen to get started, or accept
           an invitation from your team.
         </p>
-        <Link className="button" to="/organizations/new">
+        <Link className="button button-primary" to="/organizations/new">
           Create an organization
         </Link>
       </section>

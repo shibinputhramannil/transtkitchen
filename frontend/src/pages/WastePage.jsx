@@ -47,7 +47,7 @@ function VoidForm({ organizationId, entry, onVoided, onCancel }) {
         value={reason}
         onChange={(event) => setReason(event.target.value)}
       />
-      <button type="submit" disabled={busy}>
+      <button type="submit" className="button-danger" disabled={busy}>
         Void and return stock
       </button>
       <button type="button" onClick={onCancel} disabled={busy}>

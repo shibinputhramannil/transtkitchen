@@ -1,35 +1,77 @@
-:root {
-  --bg: #fafaf9;
-  --surface: #ffffff;
-  --text: #1c1917;
-  --text-muted: #57534e;
-  --border: #e7e5e4;
-  --ok-bg: #dcfce7;
-  --ok-text: #166534;
-  --error-bg: #fee2e2;
-  --error-text: #b91c1c;
-  --warning-bg: #fef3c7;
-  --warning-text: #92400e;
+/*
+ * Transt brand theme, matching the Transt e-commerce frontend
+ * (transt-ecommerce: frontend/src/index.css). Values marked "derived" are not in
+ * that file; they were added here for accessibility and are built from its colours.
+ */
 
-  color-scheme: light dark;
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
+/* Plus Jakarta Sans (SIL Open Font License, see assets/fonts/OFL.txt), served
+   from this site so the Content Security Policy can stay `font-src 'self'`. */
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('./assets/fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329,
+    U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1917;
-    --surface: #292524;
-    --text: #f5f5f4;
-    --text-muted: #a8a29e;
-    --border: #44403c;
-    --ok-bg: #14532d;
-    --ok-text: #bbf7d0;
-    --error-bg: #7f1d1d;
-    --error-text: #fecaca;
-    --warning-bg: #78350f;
-    --warning-text: #fde68a;
-  }
+@font-face {
+  font-family: 'Plus Jakarta Sans';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url('./assets/fonts/plus-jakarta-sans-latin-wght-normal.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  --color-primary: #2f604b;
+  --color-primary-hover: #254d3c;
+  --color-primary-dark: #1a372b;
+  --color-primary-light: #eaf2ee;
+  --color-primary-subtle: #d6e5de;
+
+  --color-background: #f5f2eb;
+  --color-surface: #ffffff;
+  --color-surface-cream: #faf8f5;
+
+  --color-accent-light: #f9f4ed;
+  --color-accent-border: #ded2be;
+
+  --color-text: #192e24;
+  --color-text-secondary: #2f4339;
+  --color-text-muted: #5f7369;
+
+  --color-border: #ded7c8;
+  --color-border-subtle: #eae4d7;
+  /* Derived: the border colour moved towards --color-text-muted until form
+     fields reach the 3:1 contrast WCAG asks for (3.2:1 on white). */
+  --color-control-border: #889387;
+
+  --color-error: #b84a4a;
+  --color-error-light: #fdf2f2;
+  --color-error-border: #f0cccc;
+  /* Derived: a darker hover for the danger button (white text stays above 6:1). */
+  --color-error-hover: #9f3f3f;
+
+  /* The reference's warning badge uses Tailwind's amber 50, 800 and 200. */
+  --color-warning: #92400e;
+  --color-warning-light: #fffbeb;
+  --color-warning-border: #fde68a;
+
+  --shadow-sm: 0 1px 2px 0 rgba(25, 46, 36, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(25, 46, 36, 0.06), 0 2px 4px -1px rgba(25, 46, 36, 0.03);
+
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+  /* The Transt theme is light only. */
+  color-scheme: light;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
@@ -38,6 +80,6 @@
 
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-background);
+  color: var(--color-text);
 }

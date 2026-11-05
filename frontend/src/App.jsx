@@ -13,6 +13,7 @@ import PrepPage from './pages/PrepPage.jsx'
 import TeamPage from './pages/TeamPage.jsx'
 import LoginPage from './pages/LoginPage.jsx'
 import RegisterPage from './pages/RegisterPage.jsx'
+import transtLogo from './assets/brand/transt-logo.png'
 import './App.css'
 
 // Pages for signed-in users; everyone else is sent to the sign-in page.
@@ -42,7 +43,10 @@ function App() {
     <main className="app">
       <header className="app-header">
         <div>
-          <h1>KitchenMind AI</h1>
+          <h1 className="brand-title">
+            <img className="brand-logo" src={transtLogo} alt="Transt" width="355" height="120" />{' '}
+            <span className="brand-product">KitchenMind AI</span>
+          </h1>
           <p className="tagline">
             Kitchen operations for independent restaurants, bakeries, and cloud kitchens.
           </p>

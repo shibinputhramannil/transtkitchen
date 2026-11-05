@@ -1,4 +1,4 @@
-# KitchenMind AI
+# Transt KitchenMind AI
 
 Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
@@ -10,7 +10,7 @@ tracking, and waste logging.
 > import sales from CSV files, log waste, and plan prep from sales forecasts.
 > The app is prepared for its first Render deploy (see
 > [Deploy to Render](#deploy-to-render)) but not yet deployed.
-> A UI redesign is planned for after the remaining development phases.
+> The interface uses the Transt green and cream brand theme.
 
 ## Stack
 
@@ -28,6 +28,12 @@ frontend/   Vite React app
 docker-compose.yml   local development stack
 render.yaml          Render Blueprint for production
 ```
+
+The interface uses the Transt brand theme: colour tokens in
+[frontend/src/index.css](frontend/src/index.css) and the Transt logo in
+`frontend/src/assets/brand/`. The Plus Jakarta Sans font is served from the
+site itself (no external font requests, which keeps the Content Security Policy
+strict) under the SIL Open Font License in `frontend/src/assets/fonts/OFL.txt`.
 
 ## Run locally
 
