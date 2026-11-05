@@ -522,9 +522,8 @@ Plans never change stock: deliveries, counts, sales, and waste do.
 - Multi-factor authentication, account lockout, deleting organizations, and
   database row-level security. The static site's Content Security Policy ships
   in report-only mode until it is checked on the deployed site.
-- Rate-limit counters are kept per server process. On Render,
-  `DRF_NUM_PROXIES=0` makes everyone behind Render's proxy share each limit
-  until the real proxy count is established (see
+- Rate-limit counters are kept per server process, so they reset when the API
+  restarts. On Render, `DRF_NUM_PROXIES=3` gives each client its own limit (see
   [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy)).
 - Expired tokens are deleted at every API start; a long-running server
   without restarts would need `python manage.py flushexpiredtokens` run
@@ -598,7 +597,7 @@ the service would override it, so leave that unset.
 |                   | `CORS_ALLOWED_ORIGINS`         | Entered when applying: the frontend URL, e.g. `https://kitchenmind-web.onrender.com` (no trailing slash). |
 |                   | `CSRF_TRUSTED_ORIGINS`         | Entered when applying: the same frontend URL. |
 |                   | `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD` | Temporary, for the first admin only. See [First admin account](#first-admin-account). |
-|                   | `DRF_NUM_PROXIES`              | `0` on Render for now (everyone shares each limit); never leave it unset. See [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy). |
+|                   | `DRF_NUM_PROXIES`              | `3` on Render (established 2026-11-05); never leave it unset. See [Rate limiting behind Render's proxy](#rate-limiting-behind-renders-proxy). |
 |                   | `DJANGO_SECURE_HSTS_SECONDS`   | Optional, default `3600`. Raise it last. See [HTTPS and HSTS](#https-and-hsts). |
 | `kitchenmind-web` | `VITE_API_URL`                 | Entered when applying: the API URL, e.g. `https://kitchenmind-api.onrender.com`. Built into the bundle, so redeploy the static site after changing it. |
 
@@ -729,33 +728,36 @@ clients are told apart:
 - **Unset:** the whole `X-Forwarded-For` header identifies the client, so
   anyone can send a different made-up value with each request and never reach
   the limit. Never leave it unset on Render.
-- **`0`** (the current setting on Render): the header is ignored and the limit
-  applies to the proxy's address, so everyone behind the same proxy address
-  shares one limit. It cannot be bypassed, but when many people sign in at once,
-  or someone abuses it, legitimate requests can get `429` for up to a minute.
+- **`0`:** the header is ignored and the limit applies to the proxy's address,
+  so everyone behind the same proxy address shares one limit. It cannot be
+  bypassed, but when many people sign in at once, or someone abuses it,
+  legitimate requests can get `429` for up to a minute. Use it as a fallback.
+- **Too small:** the limit applies to a proxy's address; on Render those change
+  from request to request, so the limit never triggers.
 - **Too large:** anyone can choose their own address with a made-up header and
   bypass the limit, as when unset.
-- **The real proxy count:** each client gets its own limit, and made-up headers
-  do not help. Render does not document this number.
+- **The real proxy count, `3` on Render** (the current setting): each client gets
+  its own limit, and made-up headers do not help.
 
-Find the real count without logging any client addresses:
+Render does not document the count. It was established on 2026-11-05 from one
+network, without logging any client addresses, by setting each value, letting
+the API redeploy, and sending 11 sign-ins with a wrong password for a
+non-existent account, once without and once with a different made-up
+`X-Forwarded-For` header on each request:
 
-1. Set `DRF_NUM_PROXIES=1` and let the API redeploy.
-2. From one network (for example home Wi-Fi), sign in with a wrong password
-   until you get `429 Too Many Requests`.
-3. Within the same minute, from a different network (for example a phone on
-   mobile data), try once. A `429` here means clients are still sharing a
-   limit: try `2` and repeat. A normal error (`401`) means clients are told
-   apart.
-4. From the first network, wait for the limit to clear, exceed it again while
-   sending a made-up `X-Forwarded-For: 203.0.113.7` header with each request,
-   and confirm you still get `429`. If the fake header lets you through, the
-   value is too large.
+| `DRF_NUM_PROXIES` | Without a made-up header | With made-up headers |
+| ----------------- | ------------------------ | -------------------- |
+| `1`               | never limited            | never limited        |
+| `2`               | never limited            | never limited        |
+| `3`               | `429` on the 11th        | `429` on the 11th    |
+| `4`               | (not needed)             | never limited        |
 
-If no value passes both checks, keep `0`. The counters are kept per server
-process, so with more than one gunicorn worker (`WEB_CONCURRENCY`) the
-effective limit is that many times higher; the free instance was seen starting
-one worker.
+The real count is the largest value that still returns `429` with made-up
+headers, as long as it also returns `429` without them. Repeat this if the
+hosting setup changes (for example a custom domain or another proxy). The
+counters are kept per server process, so with more than one gunicorn worker
+(`WEB_CONCURRENCY`) the effective limit is that many times higher; the free
+instance starts one worker.
 
 ### HTTPS and HSTS
 
@@ -792,8 +794,8 @@ These cannot be verified locally and should be ticked off on the first deploy:
       security headers.
 - [ ] Only the expected service redeploys when `backend/` or `frontend/` changes.
 - [ ] No CSP reports on any screen, then the CSP is enforced.
-- [ ] `DRF_NUM_PROXIES` is the real proxy count from the procedure above (it is
-      `0` until then; never unset).
+- [x] `DRF_NUM_PROXIES` is the real proxy count: `3`, established 2026-11-05 by
+      the test above.
 - [ ] `WEB_CONCURRENCY` and memory use on the free instance.
 - [ ] The first admin exists and both bootstrap variables are removed.
 - [ ] External database access is narrowed.
