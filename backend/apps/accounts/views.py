@@ -1,12 +1,14 @@
 from rest_framework import generics
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import (
     TokenBlacklistView,
     TokenObtainPairView,
     TokenRefreshView,
 )
 
-from .serializers import RegisterSerializer, UserSerializer
+from .serializers import PasswordChangeSerializer, RegisterSerializer, UserSerializer
 
 
 class RegisterView(generics.CreateAPIView):
@@ -30,6 +32,26 @@ class RefreshView(TokenRefreshView):
 
 class LogoutView(TokenBlacklistView):
     """Revokes the given refresh token."""
+
+
+class PasswordChangeView(generics.GenericAPIView):
+    """
+    Changes the signed-in user's password: {current_password, new_password}.
+    Every token issued before the change stops working (other devices are
+    signed out); the response holds a fresh access and refresh token for this one.
+    """
+
+    serializer_class = PasswordChangeSerializer
+    throttle_scope = "auth"
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        refresh = RefreshToken.for_user(user)
+        return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
 
 
 class MeView(generics.RetrieveUpdateAPIView):

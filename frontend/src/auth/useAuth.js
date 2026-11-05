@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react'
 
 export const AuthContext = createContext(null)
 
-// { user, signIn, signUp, signOut }; user is null when signed out.
+// { user, signIn, signUp, signOut, updateProfile, changePassword }; user is null when signed out.
 export function useAuth() {
   const auth = useContext(AuthContext)
   if (!auth) {

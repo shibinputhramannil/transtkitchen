@@ -4,11 +4,11 @@ Kitchen operations for independent restaurants, bakeries, and cloud kitchens:
 sales-based demand forecasting, an editable prep planner, inventory and expiry
 tracking, and waste logging.
 
-> **Status: Phase 5 (forecasting and prep planning).** People can register,
-> sign in, create an organization, manage ingredients and stock with expiry
-> dates, build menu items with recipes, import sales from CSV files, log waste,
-> and plan prep from sales forecasts. A UI redesign is planned for after the
-> remaining development phases.
+> **Status: Phase 6 (team and account management).** People can register,
+> sign in, create an organization, invite and manage their team, manage
+> ingredients and stock with expiry dates, build menu items with recipes,
+> import sales from CSV files, log waste, and plan prep from sales forecasts.
+> A UI redesign is planned for after the remaining development phases.
 
 ## Stack
 
@@ -143,9 +143,24 @@ is too low gets `403 Forbidden`.
 **Invitations** are addressed to an email address and look the same whether or
 not that address has an account, so inviting never reveals who is registered.
 The invitee signs in (or registers) with that address and accepts or declines;
-invitations expire after 7 days. There is no email sending yet, so tell people
-about their invitation yourself, and accepting is API-only until the member
-management screens are built.
+invitations expire after 7 days. Only the signed-in user whose email matches
+an invitation can see, accept, or decline it. There is no email sending yet,
+so tell people about their invitation yourself.
+
+**Screens:** the **Team** page (from the dashboard) lists members and lets
+owners change roles, owners and managers invite people and revoke pending
+invitations (managers only for staff), and members remove others or leave as
+their role allows. The dashboard, and the welcome screen for people without an
+organization, show invitations addressed to you with Accept and Decline.
+Owners rename the organization on the dashboard. The **Account** page (from
+the header) edits your name and changes your password. The server checks every
+permission; the screens only hide what your role cannot do.
+
+**Changing your password** (`POST /api/auth/password/` with `current_password`
+and `new_password`) checks the current password and the same password rules
+as registration, signs you out everywhere else by revoking every earlier
+token, and returns a fresh token pair for the current tab. It only ever
+changes the signed-in user's own password and shares the sign-in rate limit.
 
 ### API
 
@@ -156,6 +171,7 @@ management screens are built.
 | `/api/auth/token/refresh/`                            | POST             |
 | `/api/auth/logout/`                                   | POST             |
 | `/api/auth/me/`                                       | GET, PATCH       |
+| `/api/auth/password/`                                 | POST             |
 | `/api/organizations/`                                 | GET, POST        |
 | `/api/organizations/<id>/`                            | GET, PATCH       |
 | `/api/organizations/<id>/members/`                    | GET              |
@@ -209,7 +225,10 @@ Stock changes only by recording a **stock movement**:
   delivery recorded meanwhile is not undone. The frontend always sends it.
 
 Movements are the ingredient's stock history: they cannot be edited or deleted
-through the API or the Django admin. Stock never goes below zero.
+through the API or the Django admin. Stock never goes below zero. The
+**History** button on each ingredient lists every change, newest first: its
+kind (delivery, count, sales, waste, waste voided, expiry correction), who made
+it and when, the stock level after it, and the batches it touched.
 
 | Action                                       | Owner | Manager | Staff |
 | -------------------------------------------- | ----- | ------- | ----- |
@@ -477,11 +496,9 @@ Plans never change stock: deliveries, counts, sales, and waste do.
   provider). Until then anyone can register an unverified address, including
   one that has a pending invitation. An admin can reset passwords in the Django
   admin.
-- Member management and invitation screens in the frontend; staying signed in
-  across reloads; frontend unit tests.
-- Inventory: a stock history screen (the API has it), counting batch by batch,
-  expiry notifications, purchase units (cases, packs), costs, suppliers, and
-  multiple locations per organization.
+- Staying signed in across reloads; frontend unit tests.
+- Inventory: counting batch by batch, expiry notifications, purchase units
+  (cases, packs), costs, suppliers, and multiple locations per organization.
 - Waste: money values (there are no ingredient costs yet), photos, targets and
   alerts, editable reasons, and supplier returns.
 - Planning: holiday and event adjustments, trend models, accuracy dashboards,

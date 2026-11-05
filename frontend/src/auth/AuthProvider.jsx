@@ -46,7 +46,20 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const value = useMemo(() => ({ user, signIn, signUp, signOut }), [user, signIn, signUp, signOut])
+  const updateProfile = useCallback(async (changes) => {
+    setUser(await api.updateMe(changes))
+  }, [])
+
+  // The server revokes every earlier token; keep this tab signed in with the
+  // fresh pair it returns (still in memory only).
+  const changePassword = useCallback(async (currentPassword, newPassword) => {
+    setTokens(await api.changePassword(currentPassword, newPassword))
+  }, [])
+
+  const value = useMemo(
+    () => ({ user, signIn, signUp, signOut, updateProfile, changePassword }),
+    [user, signIn, signUp, signOut, updateProfile, changePassword],
+  )
 
   return <AuthContext value={value}>{children}</AuthContext>
 }

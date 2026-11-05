@@ -9,6 +9,7 @@ import {
   listBatches,
   listExpiring,
   listIngredients,
+  listStockMovements,
   receiveStock,
   updateIngredient,
 } from '../api/client.js'
@@ -242,6 +243,99 @@ function ExpiryCorrectionForm({ organizationId, ingredientId, batch, onSaved, on
   )
 }
 
+const MOVEMENT_LABELS = {
+  receive: 'Delivery',
+  count: 'Stock count',
+  expiry_correction: 'Expiry date corrected',
+  sale: 'Sales',
+  waste: 'Waste',
+  waste_void: 'Waste voided',
+}
+
+function signed(quantity) {
+  return Number(quantity) > 0 ? `+${formatQuantity(quantity)}` : formatQuantity(quantity)
+}
+
+// Every change to the ingredient's stock, newest first, with the batches each one touched.
+function StockHistory({ organizationId, ingredient }) {
+  const [page, setPage] = useState(1)
+  const [result, setResult] = useState(null)
+  const [errors, setErrors] = useState([])
+
+  useEffect(() => {
+    let cancelled = false
+    listStockMovements(organizationId, ingredient.id, page).then(
+      (data) => {
+        if (!cancelled) setResult({ page, ...data })
+      },
+      (error) => {
+        if (!cancelled) setErrors(errorMessages(error))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [organizationId, ingredient.id, ingredient.quantity_on_hand, page])
+
+  if (errors.length) return <FormErrors errors={errors} />
+  if (!result || result.page !== page) return <p>Loading history…</p>
+  if (!result.results.length) return <p className="muted">No stock changes yet.</p>
+
+  return (
+    <div className="inline-form">
+      <ul className="batch-list">
+        {result.results.map((movement) => (
+          <li key={movement.id}>
+            <div className="ingredient-summary">
+              <span>
+                <strong>{MOVEMENT_LABELS[movement.kind] ?? movement.kind}</strong>
+                <span className="muted">
+                  {' '}
+                  · {new Date(movement.created_at).toLocaleString()} · {movement.created_by ?? 'a former member'}
+                </span>
+              </span>
+              <span>
+                {movement.kind !== 'expiry_correction' && (
+                  <strong>
+                    {signed(movement.quantity_change)} {ingredient.unit}
+                  </strong>
+                )}
+                <span className="muted">
+                  {' '}
+                  → {formatQuantity(movement.quantity_after)} {ingredient.unit}
+                </span>
+              </span>
+            </div>
+            {movement.note && <span className="muted">{movement.note}</span>}
+            {movement.lines.length > 0 && (
+              <span className="muted">
+                Batches:{' '}
+                {movement.lines
+                  .map(
+                    (line) =>
+                      `${signed(line.quantity_change)} ${ingredient.unit} (${line.expires_on ? `expiring ${line.expires_on}` : 'no expiry'})`,
+                  )
+                  .join('; ')}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      {(result.previous || result.next) && (
+        <div className="actions">
+          <button type="button" disabled={!result.previous} onClick={() => setPage((current) => current - 1)}>
+            Newer
+          </button>
+          <span className="muted">Page {page}</span>
+          <button type="button" disabled={!result.next} onClick={() => setPage((current) => current + 1)}>
+            Older
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // Throwing a whole batch out defaults to its full remaining quantity.
 function discardReason(batch) {
   return batch.status === 'expired' ? 'expired' : 'spoiled'
@@ -340,7 +434,7 @@ function BatchList({ organizationId, timeZone, ingredient, canManage, onChanged 
 }
 
 function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChanged, onReload }) {
-  // null, 'receive', 'count', 'waste', 'edit', or 'batches'.
+  // null, 'receive', 'count', 'waste', 'edit', 'batches', or 'history'.
   const [open, setOpen] = useState(null)
   const [archiveErrors, setArchiveErrors] = useState([])
   const [archiving, setArchiving] = useState(false)
@@ -390,7 +484,7 @@ function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChan
           )}
         </div>
       )}
-      {(open === null || open === 'batches') && (
+      {(open === null || open === 'batches' || open === 'history') && (
         <div className="actions">
           {open === null && ingredient.is_active && (
             <>
@@ -411,6 +505,13 @@ function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChan
             onClick={() => setOpen(open === 'batches' ? null : 'batches')}
           >
             {open === 'batches' ? 'Hide batches' : 'Batches'}
+          </button>
+          <button
+            type="button"
+            aria-expanded={open === 'history'}
+            onClick={() => setOpen(open === 'history' ? null : 'history')}
+          >
+            {open === 'history' ? 'Hide history' : 'History'}
           </button>
           {open === null && canManage && (
             <>
@@ -433,6 +534,7 @@ function IngredientRow({ organizationId, timeZone, ingredient, canManage, onChan
           onChanged={onReload}
         />
       )}
+      {open === 'history' && <StockHistory organizationId={organizationId} ingredient={ingredient} />}
       <FormErrors errors={archiveErrors} />
       {open === 'waste' && (
         <WasteForm

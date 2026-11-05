@@ -53,6 +53,30 @@ class RegisterSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"email": [DUPLICATE_EMAIL]}) from None
 
 
+class PasswordChangeSerializer(serializers.Serializer):
+    """Changes the signed-in user's own password; the user comes from the request, never the body."""
+
+    current_password = serializers.CharField(write_only=True, trim_whitespace=False)
+    new_password = serializers.CharField(write_only=True, trim_whitespace=False)
+
+    def validate_current_password(self, value):
+        if not self.context["request"].user.check_password(value):
+            raise serializers.ValidationError("The current password is incorrect.")
+        return value
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        if attrs["new_password"] == attrs["current_password"]:
+            raise serializers.ValidationError(
+                {"new_password": ["Choose a password different from the current one."]}
+            )
+        try:
+            validate_password(attrs["new_password"], user)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"new_password": list(error.messages)}) from None
+        return attrs
+
+
 class TokenRefreshSerializer(jwt_serializers.TokenRefreshSerializer):
     """
     simplejwt checks for a changed password only on access tokens and fails

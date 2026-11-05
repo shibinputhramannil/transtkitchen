@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router'
-import { errorMessages, listMembers, listOrganizations, updateOrganization } from '../api/client.js'
+import {
+  acceptInvitation,
+  declineInvitation,
+  errorMessages,
+  listMembers,
+  listMyInvitations,
+  listOrganizations,
+  updateOrganization,
+} from '../api/client.js'
 import FormErrors from '../components/FormErrors.jsx'
 import { timeZoneOptions } from '../timeZones.js'
 
@@ -60,6 +68,110 @@ function MemberList({ organizationId }) {
   )
 }
 
+// Invitations addressed to the signed-in user's email. The server only lists
+// and accepts invitations for that address.
+function InvitationInbox({ onAccepted }) {
+  const [invitations, setInvitations] = useState(null)
+  const [errors, setErrors] = useState([])
+  const [busy, setBusy] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    listMyInvitations().then(
+      (data) => {
+        if (!cancelled) setInvitations(data.results)
+      },
+      (error) => {
+        if (!cancelled) setErrors(errorMessages(error))
+      },
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  async function respond(invitation, accept) {
+    if (busy) return
+    setBusy(invitation.id)
+    setErrors([])
+    try {
+      const organization = accept ? await acceptInvitation(invitation.id) : await declineInvitation(invitation.id)
+      setInvitations((current) => current.filter((item) => item.id !== invitation.id))
+      if (accept) onAccepted(organization)
+    } catch (error) {
+      setErrors(errorMessages(error))
+    }
+    setBusy(null)
+  }
+
+  if (!invitations?.length && !errors.length) return null
+  return (
+    <section className="expiring" aria-labelledby="invitations-heading">
+      <h3 id="invitations-heading">Invitations for you</h3>
+      <FormErrors errors={errors} />
+      <ul className="batch-list">
+        {(invitations ?? []).map((invitation) => (
+          <li key={invitation.id}>
+            <div className="ingredient-summary">
+              <span>
+                <strong>{invitation.organization.name}</strong>
+                <span className="muted">
+                  {' '}
+                  · as {ROLE_LABELS[invitation.role]} · from {invitation.invited_by ?? 'a former member'} · expires{' '}
+                  {new Date(invitation.expires_at).toLocaleDateString()}
+                </span>
+              </span>
+              <span className="actions">
+                <button type="button" disabled={busy !== null} onClick={() => respond(invitation, true)}>
+                  Accept
+                </button>
+                <button type="button" disabled={busy !== null} onClick={() => respond(invitation, false)}>
+                  Decline
+                </button>
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+// Everyone sees the name; only owners can change it (the server enforces this too).
+function NameSetting({ organization, onChanged }) {
+  const [value, setValue] = useState(organization.name)
+  const [errors, setErrors] = useState([])
+  const [saving, setSaving] = useState(false)
+
+  if (organization.role !== 'owner') return null
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (saving) return
+    setSaving(true)
+    setErrors([])
+    try {
+      onChanged(await updateOrganization(organization.id, { name: value }))
+    } catch (error) {
+      setErrors(errorMessages(error))
+    }
+    setSaving(false)
+  }
+
+  return (
+    <form className="toolbar" onSubmit={handleSubmit}>
+      <label className="inline-label">
+        Organization name
+        <input required maxLength={150} value={value} onChange={(event) => setValue(event.target.value)} />
+      </label>
+      <button type="submit" disabled={saving || value.trim() === organization.name || !value.trim()}>
+        {saving ? 'Saving…' : 'Rename'}
+      </button>
+      <FormErrors errors={errors} />
+    </form>
+  )
+}
+
 // Everyone sees the time zone; only owners can change it (the server enforces this too).
 function TimeZoneSetting({ organization, onChanged }) {
   const [value, setValue] = useState(organization.time_zone)
@@ -108,6 +220,7 @@ export default function DashboardPage() {
   const [organizations, setOrganizations] = useState(null)
   const [errors, setErrors] = useState([])
   const [selectedId, setSelectedId] = useState(location.state?.organizationId ?? null)
+  const [reloadCount, setReloadCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -122,7 +235,16 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadCount])
+
+  function handleAccepted(organization) {
+    setSelectedId(organization.id)
+    setReloadCount((count) => count + 1)
+  }
+
+  function replaceOrganization(updated) {
+    setOrganizations((current) => current.map((candidate) => (candidate.id === updated.id ? updated : candidate)))
+  }
 
   if (errors.length) {
     return (
@@ -142,7 +264,11 @@ export default function DashboardPage() {
     return (
       <section className="card">
         <h2>Welcome to KitchenMind</h2>
-        <p>Create an organization for your restaurant, bakery, or cloud kitchen to get started.</p>
+        <InvitationInbox onAccepted={handleAccepted} />
+        <p>
+          Create an organization for your restaurant, bakery, or cloud kitchen to get started, or accept
+          an invitation from your team.
+        </p>
         <Link className="button" to="/organizations/new">
           Create an organization
         </Link>
@@ -155,6 +281,7 @@ export default function DashboardPage() {
 
   return (
     <section className="card">
+      <InvitationInbox onAccepted={handleAccepted} />
       <div className="card-header">
         <h2>{organization.name}</h2>
         <span className="badge">{ROLE_LABELS[organization.role]}</span>
@@ -171,15 +298,8 @@ export default function DashboardPage() {
           </select>
         </label>
       )}
-      <TimeZoneSetting
-        key={organization.id}
-        organization={organization}
-        onChanged={(updated) =>
-          setOrganizations((current) =>
-            current.map((candidate) => (candidate.id === updated.id ? updated : candidate)),
-          )
-        }
-      />
+      <NameSetting key={`name-${organization.id}`} organization={organization} onChanged={replaceOrganization} />
+      <TimeZoneSetting key={organization.id} organization={organization} onChanged={replaceOrganization} />
       <div className="actions">
         <Link className="button" to={`/organizations/${organization.id}/inventory`}>
           Inventory
@@ -195,6 +315,9 @@ export default function DashboardPage() {
         </Link>
         <Link className="button" to={`/organizations/${organization.id}/prep`}>
           Prep
+        </Link>
+        <Link className="button" to={`/organizations/${organization.id}/team`}>
+          Team
         </Link>
       </div>
       <MemberList organizationId={organization.id} />

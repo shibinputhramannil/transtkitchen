@@ -131,6 +131,31 @@ export function getMe() {
   return authRequest('GET', '/api/auth/me/')
 }
 
+export function updateMe(changes) {
+  return authRequest('PATCH', '/api/auth/me/', changes)
+}
+
+// Returns a fresh token pair; every earlier token stops working.
+export function changePassword(currentPassword, newPassword) {
+  return authRequest('POST', '/api/auth/password/', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  })
+}
+
+// Invitations addressed to the signed-in user's email.
+export function listMyInvitations() {
+  return authRequest('GET', '/api/invitations/')
+}
+
+export function acceptInvitation(invitationId) {
+  return authRequest('POST', `/api/invitations/${encodeURIComponent(invitationId)}/accept/`)
+}
+
+export function declineInvitation(invitationId) {
+  return authRequest('POST', `/api/invitations/${encodeURIComponent(invitationId)}/decline/`)
+}
+
 export function listOrganizations() {
   return authRequest('GET', '/api/organizations/')
 }
@@ -157,6 +182,27 @@ export function updateOrganization(organizationId, changes) {
 
 export function listMembers(organizationId) {
   return authRequest('GET', organizationPath(organizationId, 'members/'))
+}
+
+export function updateMembership(organizationId, membershipId, role) {
+  return authRequest('PATCH', organizationPath(organizationId, `members/${encodeURIComponent(membershipId)}/`), { role })
+}
+
+// Removing yourself is leaving the organization.
+export function removeMembership(organizationId, membershipId) {
+  return authRequest('DELETE', organizationPath(organizationId, `members/${encodeURIComponent(membershipId)}/`))
+}
+
+export function listOrganizationInvitations(organizationId) {
+  return authRequest('GET', organizationPath(organizationId, 'invitations/'))
+}
+
+export function inviteMember(organizationId, email, role) {
+  return authRequest('POST', organizationPath(organizationId, 'invitations/'), { email, role })
+}
+
+export function revokeInvitation(organizationId, invitationId) {
+  return authRequest('DELETE', organizationPath(organizationId, `invitations/${encodeURIComponent(invitationId)}/`))
 }
 
 export function listIngredients(organizationId, { search = '', archived = false, page = 1 } = {}) {
@@ -197,6 +243,10 @@ export function countStock(
     note,
     request_id: requestId,
   })
+}
+
+export function listStockMovements(organizationId, ingredientId, page = 1) {
+  return authRequest('GET', ingredientPath(organizationId, ingredientId, `movements/?page=${page}`))
 }
 
 export function listBatches(organizationId, ingredientId) {

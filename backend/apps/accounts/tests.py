@@ -315,6 +315,80 @@ class RefreshAndLogoutTests(APITestCase):
         self.assertEqual(self.refresh_with(self.refresh).status_code, 401)
 
 
+class PasswordChangeTests(APITestCase):
+    url = reverse("password-change")
+    NEW = "Battery-Staple-77"
+
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(email="chef@example.com", password=PASSWORD)
+        self.other = User.objects.create_user(email="other@example.com", password=PASSWORD)
+        self.refresh = RefreshToken.for_user(self.user)
+        self.access = str(self.refresh.access_token)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access}")
+
+    def change(self, current=PASSWORD, new=None, **extra):
+        return self.client.post(self.url, {"current_password": current, "new_password": new or self.NEW, **extra})
+
+    def test_requires_sign_in(self):
+        self.client.credentials()
+
+        self.assertEqual(self.change().status_code, 401)
+
+    def test_wrong_current_password_changes_nothing(self):
+        response = self.change(current="not-my-password")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("current_password", response.json())
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(PASSWORD))
+
+    def test_new_password_must_pass_the_password_rules(self):
+        for new in ("password", "12345678", "chef@example", PASSWORD):
+            with self.subTest(new=new):
+                response = self.change(new=new)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("new_password", response.json())
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(PASSWORD))
+
+    def test_success_revokes_old_tokens_and_returns_working_ones(self):
+        response = self.change()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.json()), {"access", "refresh"})
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.NEW))
+        # Every earlier token, on any device, stops working.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.access}")
+        self.assertEqual(self.client.get(reverse("me")).status_code, 401)
+        self.assertEqual(self.client.post(reverse("token-refresh"), {"refresh": str(self.refresh)}).status_code, 401)
+        # The returned pair works.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {response.json()['access']}")
+        self.assertEqual(self.client.get(reverse("me")).json()["email"], "chef@example.com")
+        self.assertEqual(self.client.post(reverse("token-refresh"), {"refresh": response.json()["refresh"]}).status_code, 200)
+        # The new password signs in.
+        self.client.credentials()
+        self.assertEqual(self.client.post(reverse("token"), {"email": "chef@example.com", "password": self.NEW}).status_code, 200)
+
+    def test_only_the_callers_password_changes(self):
+        response = self.change(email="other@example.com", user=self.other.pk, id=self.other.pk)
+
+        self.assertEqual(response.status_code, 200)
+        self.other.refresh_from_db()
+        self.assertTrue(self.other.check_password(PASSWORD))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(self.NEW))
+
+    def test_is_rate_limited(self):
+        for _ in range(10):
+            self.change(current="wrong-guess")
+
+        self.assertEqual(self.change().status_code, 429)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password(PASSWORD))
+
+
 class MeTests(APITestCase):
     url = reverse("me")
 
