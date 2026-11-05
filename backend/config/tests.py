@@ -226,7 +226,9 @@ class ApiDefaultsTests(SimpleTestCase):
 
     def test_sign_in_and_registration_are_rate_limited(self):
         self.assertEqual(api_settings.DEFAULT_THROTTLE_CLASSES, [ScopedRateThrottle])
-        self.assertEqual(api_settings.DEFAULT_THROTTLE_RATES, {"auth": "10/minute"})
+        self.assertEqual(
+            api_settings.DEFAULT_THROTTLE_RATES, {"auth": "10/minute", "csp_reports": "60/minute"}
+        )
 
     def test_list_endpoints_are_paginated(self):
         self.assertEqual(api_settings.PAGE_SIZE, 50)

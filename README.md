@@ -188,8 +188,10 @@ changes the signed-in user's own password and shares the sign-in rate limit.
 | `/api/organizations/<id>/invitations/<invitation id>/`| DELETE           |
 | `/api/invitations/` (your pending invitations)        | GET              |
 | `/api/invitations/<id>/accept/`, `.../decline/`       | POST             |
+| `/api/csp-reports/` (browser CSP violation reports; no sign-in) | POST   |
 
-Registration and sign-in are limited to 10 requests per minute per client.
+Registration and sign-in are limited to 10 requests per minute per client, and
+CSP violation reports to 60 (see [Security headers](#security-headers)).
 
 ### Adding tenant data
 
@@ -460,8 +462,9 @@ on a business date, from applied sales imports only:
 - The forecast is the average of the last 4 trading days on the same weekday
   (within 8 weeks), if there are at least 3; otherwise the average of the last
   14 trading days, if there are at least 7; otherwise there is not enough
-  history and the manager decides. Every forecast lists the days and
-  quantities it used.
+  history and the manager decides. The API lists the days and quantities
+  every forecast used; the Prep screen shows the quantities for weekday
+  averages and the number of days for 14-day averages.
 
 **Prep plans** say how many portions of each menu item to prepare for one
 business date, from today up to 14 days ahead; there is one plan per date.
@@ -687,6 +690,24 @@ not yet against the deployed site. To enforce it:
 
 Header changes in `render.yaml` apply when the Blueprint syncs. If you edit
 headers in the dashboard instead, mirror the change in `render.yaml`.
+
+**Violation reports.** The API accepts browsers' CSP violation reports at
+`POST /api/csp-reports/`, in both the `report-uri` and the Reporting API
+(`report-to`) formats: no sign-in, at most 16 KB, and 60 requests a minute per
+client. It replies `204`, or `413` for a body that is too large and `429` when
+the rate limit is reached. It stores nothing. Each distinct violation is written to the API log at most once
+an hour per server process, as one line: the disposition, the directive, the
+blocked resource reduced to a keyword such as `inline` or to its origin, the
+page path with IDs replaced by `:id` and without its query string, the source
+file on the frontend's own origin with line and column, the HTTP status, and
+the browser family and major version. This line never contains IP addresses,
+full user agents, referrers, code samples, the policy text, or query strings,
+and reports for other sites or caused by browser extensions are ignored. Like
+every API request, each report also appears in gunicorn's access log, which
+records the connecting address and the full user agent. The
+static site's policy does not send reports here yet: that needs
+`report-uri` and `report-to` in its policy and a `Reporting-Endpoints` header in
+`render.yaml`.
 
 ### Rate limiting behind Render's proxy
 

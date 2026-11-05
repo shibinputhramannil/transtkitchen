@@ -141,9 +141,10 @@ REST_FRAMEWORK = {
     + (["rest_framework.renderers.BrowsableAPIRenderer"] if DEBUG else []),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
-    # Only views with a throttle_scope are limited (registration and sign-in).
+    # Only views with a throttle_scope are limited (registration, sign-in,
+    # password changes, and CSP violation reports).
     "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
-    "DEFAULT_THROTTLE_RATES": {"auth": "10/minute"},
+    "DEFAULT_THROTTLE_RATES": {"auth": "10/minute", "csp_reports": "60/minute"},
     # How many proxies sit in front of the API and append to X-Forwarded-For.
     # Unset, clients can vary that header to dodge the rate limit; set it once
     # the hosting setup is confirmed.
