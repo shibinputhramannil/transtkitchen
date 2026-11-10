@@ -14,9 +14,15 @@ databases:
   - name: kitchenmind-db
     databaseName: kitchenmind
     user: kitchenmind
+    # After upgrading in the dashboard (README: "Upgrading the database"), set
+    # `plan` and `diskSizeGB` here to exactly what the dashboard shows BEFORE
+    # any Blueprint sync: a sync overwrites dashboard changes, so a stale
+    # `free` here could try to move the database back to the free plan.
     plan: free
     region: singapore
     postgresMajorVersion: "17"
+    # No ipAllowList on purpose: without it, a sync keeps the inbound rules set
+    # in the dashboard. This repository is public, so addresses never go here.
 
 services:
   - type: web

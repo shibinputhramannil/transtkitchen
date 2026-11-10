@@ -772,15 +772,90 @@ cannot be withdrawn early. Subdomains and preloading stay off, because
 
 - **Upgrade the database to a paid plan before storing real data.** Free
   databases expire and have no backups. Paid plans include point-in-time
-  recovery (3 days on Hobby, 7 days on Pro at the time of writing).
-- The Blueprint does not restrict external database access, so Render's
-  default applies. In the database's **Networking** settings, check which
-  addresses can connect from outside Render and narrow the list to your own
-  address, or to none.
-- To take a manual backup, run `pg_dump` with the database's **external**
-  connection string from your own machine, and keep the file somewhere safe and
-  private. Never commit it.
-- Never reset, delete, or recreate the Render database without a fresh backup.
+  recovery (3 days on Hobby, 7 days on Pro at the time of writing). See
+  [Upgrading the database](#upgrading-the-database).
+- **Take your own backups as well**, before every deploy with migrations and
+  before any plan change: `pg_dump --format=custom` over the database's
+  **external** connection with `sslmode=verify-full`, encrypt the file, and
+  prove it restores into a throwaway PostgreSQL 17 database before relying on
+  it. Keep backups, their encryption keys, and the scripts that hold connection
+  details out of this repository. Use the [read-only login](#read-only-database-login)
+  for backups once it exists.
+- Never reset, delete, or recreate the Render database without a fresh,
+  restore-tested backup.
+
+#### Upgrading the database
+
+Render does not document whether moving a free database to a paid plan keeps
+its data, its host name, or its connection strings, so treat it as a risky
+change:
+
+1. **Take a fresh backup** and check that it restores (above), immediately
+   before the change.
+2. **Pick a quiet time.** Render says the database is unavailable for a few
+   minutes during a plan change (seconds only with high availability, which
+   needs 1 CPU or more). The API answers with errors meanwhile, and
+   `/api/health/` reports the database as down.
+3. On the database's **Plan** page, under **Compute**, choose **Edit**, pick the
+   plan and check the storage it shows, then **Save**. The smallest paid plan
+   is 0.1 CPU / 256 MB (`0.1c-256mb`; $6 a month when this was written, storage
+   billed separately). Storage can be increased later but never decreased.
+4. **Verify:** the database shows **Available** and no expiry date,
+   `/api/health/` returns `"database": "ok"`, you can sign in, the row counts
+   match the backup's, and the **Recovery** page offers point-in-time recovery.
+   Check that your backup still connects with the same host name.
+5. **Update `render.yaml` straight away:** set `plan` to the new plan's ID and
+   `diskSizeGB` to the storage the dashboard shows (`1` or a multiple of `5`),
+   and commit before any Blueprint sync. A sync overwrites dashboard changes,
+   so a stale `plan: free` could try to move the database back to the free
+   plan.
+
+#### Read-only database login
+
+[ops/postgres/readonly-role.sql](ops/postgres/readonly-role.sql) creates
+`kitchenmind_readonly`: a login that can read every table and sequence (also
+those added by later migrations) and change nothing, limited to 5 connections.
+Use it for backups, psql, and pgAdmin instead of the owner account.
+
+```sh
+psql "<owner's external connection string>" -f ops/postgres/readonly-role.sql
+psql "<owner's external connection string>" -c '\password kitchenmind_readonly'
+```
+
+Run it as the database's default (owner) user. `\password` asks for the new
+password twice and sends only a hash of it; keep the password in a password
+manager, never in a file. (If psql cannot show its prompt in Git Bash on
+Windows, run it through `winpty`.) The script runs in one transaction and changes nothing
+if a check fails: for example if the owner may not create roles (Render does
+not document whether its default user can) or if a table belongs to another
+user. It is safe to run again; [readonly-role-drop.sql](ops/postgres/readonly-role-drop.sql)
+removes the login and all its grants. Render does not manage or show logins made
+this way.
+
+Verified on 2026-11-10 against a local PostgreSQL 17 with fictional data and an
+owner like Render's (no superuser, allowed to create roles): the login read all
+30 tables and their row counts, every write (insert, update, delete, truncate,
+create, alter, `setval`) was refused even after turning read-only mode off, a
+table added later was readable without re-running the script, an encrypted
+`pg_dump` taken as the login restored with identical checksums, and the drop
+script left no grants behind. It has not yet been run on Render.
+
+#### External access
+
+By default Render accepts database connections from any address (`0.0.0.0/0`)
+as long as the credentials are valid. The inbound rules apply only to the
+external connection string: the API uses the internal one and is not affected.
+Only IPv4 ranges are accepted.
+
+- Narrow the rules in the dashboard (the database's **Info** page, under
+  **Networking**) to the addresses that need direct access, such as the machine
+  that takes backups, as `/32` ranges. Check your address first and make sure
+  it is reasonably stable; home connections can change address.
+- Keep addresses out of `render.yaml`: this repository is public, and without
+  `ipAllowList` a sync keeps the dashboard's rules.
+- **If your address changes**, backups and pgAdmin from that machine stop
+  connecting. The dashboard is not affected, so add the new address there and
+  remove the old one.
 
 ### Checks that need the real deploy
 
@@ -798,6 +873,8 @@ These cannot be verified locally and should be ticked off on the first deploy:
       the test above.
 - [ ] `WEB_CONCURRENCY` and memory use on the free instance.
 - [ ] The first admin exists and both bootstrap variables are removed.
+- [ ] The read-only login exists on Render and backups use it.
 - [ ] External database access is narrowed.
-- [ ] The database is upgraded before real data, or its expiry date is noted.
+- [ ] The database is upgraded before real data, or its expiry date is noted,
+      and `render.yaml` names the new plan and storage.
 - [ ] HSTS is raised once everything else works.
